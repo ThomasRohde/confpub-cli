@@ -10,7 +10,7 @@ from confpub.errors import ConfpubError, ERR_IO_CONNECTION, ERR_VALIDATION_REQUI
 class TestRequestId:
     def test_format(self):
         rid = generate_request_id()
-        assert re.match(r"^req_\d{8}_\d{6}_[0-9a-f]{4}$", rid)
+        assert re.match(r"^req_\d{8}_\d{6}_[0-9a-f]{8}$", rid)
 
     def test_uniqueness(self):
         ids = {generate_request_id() for _ in range(100)}

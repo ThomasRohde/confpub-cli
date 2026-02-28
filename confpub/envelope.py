@@ -18,9 +18,9 @@ SCHEMA_VERSION = "1.0"
 
 
 def generate_request_id() -> str:
-    """Generate a unique request ID: req_YYYYMMDD_HHMMSS_xxxx."""
+    """Generate a unique request ID: req_YYYYMMDD_HHMMSS_xxxxxxxx."""
     now = datetime.now(timezone.utc)
-    suffix = uuid.uuid4().hex[:4]
+    suffix = uuid.uuid4().hex[:8]
     return f"req_{now:%Y%m%d}_{now:%H%M%S}_{suffix}"
 
 
