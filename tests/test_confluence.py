@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from confpub.config import ResolvedConfig
-from confpub.confluence import ConfluenceClient, _slim_page
+from confpub.confluence import ConfluenceClient, _slim_page, _slim_search_result
 from confpub.errors import (
     ERR_AUTH_FORBIDDEN,
     ERR_AUTH_REQUIRED,
@@ -13,6 +13,7 @@ from confpub.errors import (
     ERR_IO_CONNECTION,
     ERR_IO_FILE_NOT_FOUND,
     ERR_INTERNAL_SDK,
+    ERR_VALIDATION_REQUIRED,
     ConfpubError,
 )
 
@@ -293,3 +294,177 @@ class TestSlimPage:
         assert "version" not in result
         assert "body_storage" not in result
         assert "webui" not in result
+
+
+class TestSearch:
+    def test_structured_results(self, client):
+        client._mock_api.cql.return_value = {
+            "results": [
+                {
+                    "entityType": "content",
+                    "title": "API Docs",
+                    "excerpt": "<b>REST</b> API documentation",
+                    "content": {
+                        "id": "123",
+                        "type": "page",
+                        "title": "API Docs",
+                        "status": "current",
+                        "space": {"key": "DEV"},
+                        "version": {"when": "2026-02-28T09:15:00Z"},
+                        "container": {"title": "Development"},
+                        "_links": {"webui": "/spaces/DEV/pages/123"},
+                    },
+                }
+            ],
+            "totalSize": 1,
+        }
+        result = client.search('title = "API Docs"', excerpt_length=0)
+        assert len(result["results"]) == 1
+        r = result["results"][0]
+        assert r["id"] == "123"
+        assert r["type"] == "page"
+        assert r["title"] == "API Docs"
+        assert r["excerpt"] == "REST API documentation"
+        assert r["url"] == "https://test.atlassian.net/wiki/spaces/DEV/pages/123"
+        assert r["space_key"] == "DEV"
+        assert "entity_type" not in r  # content is the default, omitted
+        assert r["status"] == "current"
+        assert r["last_modified"] == "2026-02-28T09:15:00Z"
+        assert r["container_title"] == "Development"
+
+    def test_empty_results(self, client):
+        client._mock_api.cql.return_value = {"results": [], "totalSize": 0}
+        result = client.search('title = "nonexistent"')
+        assert result["results"] == []
+        assert result["total"] == 0
+        assert result["has_more"] is False
+
+    def test_has_more_pagination(self, client):
+        client._mock_api.cql.return_value = {
+            "results": [{"entityType": "content", "content": {"id": "1"}, "excerpt": ""}],
+            "totalSize": 50,
+        }
+        result = client.search("type = page", start=0, limit=10)
+        assert result["has_more"] is True
+        assert result["total"] == 50
+        assert result["start"] == 0
+        assert result["limit"] == 10
+
+    def test_invalid_cql_raises_validation(self, client):
+        client._mock_api.cql.side_effect = Exception("400 The query cannot be parsed")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.search("invalid!!")
+        assert exc_info.value.code == ERR_VALIDATION_REQUIRED
+
+    def test_auth_error(self, client):
+        client._mock_api.cql.side_effect = Exception("401 Unauthorized")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.search("type = page")
+        assert exc_info.value.code == ERR_AUTH_FORBIDDEN
+
+    def test_include_archived_passthrough(self, client):
+        client._mock_api.cql.return_value = {"results": [], "totalSize": 0}
+        client.search("type = page", include_archived_spaces=True)
+        client._mock_api.cql.assert_called_once_with(
+            "type = page",
+            start=0,
+            limit=25,
+            excerpt="highlight",
+            include_archived_spaces=True,
+        )
+
+    def test_excerpt_truncation(self, client):
+        long_excerpt = "word " * 100  # 500 chars
+        client._mock_api.cql.return_value = {
+            "results": [{"entityType": "content", "content": {"id": "1"}, "excerpt": long_excerpt}],
+            "totalSize": 1,
+        }
+        result = client.search("type = page", excerpt_length=50)
+        excerpt = result["results"][0]["excerpt"]
+        assert len(excerpt) <= 55  # 50 + room for trailing "…"
+        assert excerpt.endswith("…")
+
+
+class TestSlimSearchResult:
+    def test_content_result(self):
+        item = {
+            "entityType": "content",
+            "title": "My Page",
+            "excerpt": "<em>highlighted</em> text",
+            "content": {
+                "id": "42",
+                "type": "page",
+                "title": "My Page",
+                "status": "current",
+                "space": {"key": "PROJ"},
+                "version": {"when": "2026-01-01T00:00:00Z"},
+                "container": {"title": "Project Space"},
+                "_links": {"webui": "/spaces/PROJ/pages/42"},
+            },
+        }
+        result = _slim_search_result(item, base_url="https://wiki.example.com", excerpt_length=0)
+        assert result["id"] == "42"
+        assert result["type"] == "page"
+        assert "entity_type" not in result  # content is default, omitted
+        assert result["url"] == "https://wiki.example.com/spaces/PROJ/pages/42"
+        assert result["excerpt"] == "highlighted text"
+
+    def test_space_result(self):
+        item = {
+            "entityType": "space",
+            "title": "Dev Space",
+            "excerpt": "",
+            "space": {"id": "100", "key": "DEV", "name": "Dev Space"},
+        }
+        result = _slim_search_result(item)
+        assert result["entity_type"] == "space"
+        assert result["type"] == "space"
+        assert result["space_key"] == "DEV"
+        assert result["title"] == "Dev Space"
+
+    def test_user_result(self):
+        item = {
+            "entityType": "user",
+            "title": "Alice",
+            "excerpt": "",
+            "user": {"accountId": "abc123", "displayName": "Alice"},
+        }
+        result = _slim_search_result(item)
+        assert result["entity_type"] == "user"
+        assert result["type"] == "user"
+        assert result["id"] == "abc123"
+        assert result["title"] == "Alice"
+
+    def test_html_stripping(self):
+        item = {
+            "entityType": "content",
+            "excerpt": "Hello <b>world</b> and <a href='#'>link</a> text",
+            "content": {"id": "1"},
+        }
+        result = _slim_search_result(item, excerpt_length=0)
+        assert result["excerpt"] == "Hello world and link text"
+
+    def test_missing_fields_omitted(self):
+        """Null/empty fields should be omitted entirely, not set to None."""
+        item = {"entityType": "content", "content": {}, "excerpt": ""}
+        result = _slim_search_result(item)
+        assert "id" not in result
+        assert "type" not in result
+        assert "title" not in result
+        assert "url" not in result
+        assert "space_key" not in result
+        assert "last_modified" not in result
+        assert "container_title" not in result
+        assert "excerpt" not in result
+        assert "entity_type" not in result  # content is default
+
+    def test_excerpt_truncation(self):
+        long_text = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+        item = {
+            "entityType": "content",
+            "excerpt": long_text,
+            "content": {"id": "1"},
+        }
+        result = _slim_search_result(item, excerpt_length=30)
+        assert result["excerpt"].endswith("…")
+        assert len(result["excerpt"]) <= 35

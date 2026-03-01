@@ -6,6 +6,7 @@ Provides a clean interface that translates library exceptions into ConfpubError.
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
 
 from confpub.config import ResolvedConfig, load_config
@@ -15,6 +16,7 @@ from confpub.errors import (
     ERR_IO_CONNECTION,
     ERR_IO_TIMEOUT,
     ERR_INTERNAL_SDK,
+    ERR_VALIDATION_REQUIRED,
     ConfpubError,
 )
 
@@ -286,6 +288,59 @@ class ConfluenceClient:
             return {}
 
     # ------------------------------------------------------------------
+    # Search
+    # ------------------------------------------------------------------
+
+    def search(
+        self,
+        cql: str,
+        *,
+        start: int = 0,
+        limit: int = 25,
+        include_archived_spaces: bool = False,
+        excerpt_length: int = 200,
+    ) -> dict[str, Any]:
+        """Search Confluence using CQL.
+
+        Returns a dict with keys: results, total, start, limit, has_more.
+        ``excerpt_length`` caps each excerpt at *n* characters (0 = unlimited).
+        """
+        try:
+            raw = self._api.cql(
+                cql,
+                start=start,
+                limit=limit,
+                excerpt="highlight",
+                include_archived_spaces=include_archived_spaces,
+            )
+        except Exception as exc:
+            msg = str(exc)
+            if "400" in msg or "cannot be parsed" in msg.lower():
+                raise ConfpubError(
+                    ERR_VALIDATION_REQUIRED,
+                    f"Invalid CQL query: {msg}",
+                    details={"cql": cql},
+                ) from exc
+            self._handle_error(exc, "search")
+            return {}  # unreachable
+
+        base_url = self._config.base_url.rstrip("/")
+        results_raw = raw.get("results", []) if isinstance(raw, dict) else []
+        total = raw.get("totalSize", 0) if isinstance(raw, dict) else 0
+
+        results = [
+            _slim_search_result(r, base_url=base_url, excerpt_length=excerpt_length)
+            for r in results_raw
+        ]
+        return {
+            "results": results,
+            "total": total,
+            "start": start,
+            "limit": limit,
+            "has_more": (start + limit) < total,
+        }
+
+    # ------------------------------------------------------------------
     # Fingerprinting
     # ------------------------------------------------------------------
 
@@ -319,6 +374,79 @@ def _slim_page(page: dict[str, Any]) -> dict[str, Any]:
     if "webui" in links:
         base = links.get("base", "")
         result["webui"] = base + links["webui"]
+    return result
+
+
+def _slim_search_result(
+    item: dict[str, Any],
+    *,
+    base_url: str = "",
+    excerpt_length: int = 0,
+) -> dict[str, Any]:
+    """Extract agent-relevant fields from a raw Confluence search result.
+
+    Only includes fields that have a non-None, non-empty value to minimise
+    token usage when results are consumed by an LLM.  ``excerpt_length``
+    caps the excerpt at *n* characters (0 = unlimited).
+    """
+    entity_type = item.get("entityType", "content")
+
+    result: dict[str, Any] = {}
+
+    def _set(key: str, value: Any) -> None:
+        if value is not None and value != "":
+            result[key] = value
+
+    if entity_type == "content":
+        content = item.get("content", {})
+        _set("id", content.get("id"))
+        _set("type", content.get("type"))
+        _set("title", item.get("title") or content.get("title"))
+        _set("status", content.get("status"))
+
+        webui = content.get("_links", {}).get("webui", "")
+        if webui:
+            _set("url", base_url + webui)
+
+        _set("space_key", content.get("space", {}).get("key"))
+
+        version = content.get("version")
+        if isinstance(version, dict):
+            _set("last_modified", version.get("when"))
+
+        container = content.get("container")
+        if isinstance(container, dict):
+            _set("container_title", container.get("title") or container.get("name"))
+
+    elif entity_type == "space":
+        space = item.get("space", {})
+        _set("id", space.get("id"))
+        result["type"] = "space"
+        _set("title", item.get("title") or space.get("name"))
+        _set("space_key", space.get("key"))
+
+    elif entity_type == "user":
+        user = item.get("user", {})
+        _set("id", user.get("accountId") or user.get("userKey"))
+        result["type"] = "user"
+        _set("title", item.get("title") or user.get("displayName"))
+
+    else:
+        result["type"] = entity_type
+        _set("title", item.get("title"))
+
+    # Only tag entity_type when it differs from the default
+    if entity_type != "content":
+        result["entity_type"] = entity_type
+
+    # Excerpt — strip HTML tags, then truncate
+    excerpt = item.get("excerpt", "")
+    if excerpt:
+        excerpt = re.sub(r"<[^>]+>", "", excerpt)
+        if excerpt_length and len(excerpt) > excerpt_length:
+            excerpt = excerpt[:excerpt_length].rsplit(" ", 1)[0] + "…"
+    _set("excerpt", excerpt)
+
     return result
 
 

@@ -59,6 +59,25 @@ def build_guide() -> dict[str, Any]:
                 "description": "Machine-readable CLI schema for agent consumption",
                 "flags": ["--section"],
             },
+            "search": {
+                "group": "read",
+                "mutates": False,
+                "description": "Search Confluence content using CQL",
+                "flags": ["--cql", "--space", "--type", "--limit", "--start", "--include-archived", "--excerpt-length"],
+                "result_schema": {
+                    "cql_query": "string — effective CQL sent to the API",
+                    "results": "list of {id, type, title, excerpt, url, space_key, entity_type, status, last_modified, container_title}",
+                    "total": "int — total matching results",
+                    "start": "int — current offset",
+                    "limit": "int — page size",
+                    "has_more": "bool — true if more results available",
+                },
+                "examples": [
+                    'confpub search --cql \'label = "api-docs"\'',
+                    "confpub search --space DEV --type page --limit 10",
+                    'confpub search --space DEV --cql \'title ~ "deploy"\'',
+                ],
+            },
             "page.list": {
                 "group": "read",
                 "mutates": False,
@@ -197,7 +216,7 @@ def build_guide() -> dict[str, Any]:
                 "space and page in parallel"
             ),
             "safe_patterns": [
-                "Read commands (page.list, page.inspect) can parallelize freely",
+                "Read commands (search, page.list, page.inspect) can parallelize freely",
                 "Writes to DIFFERENT spaces can parallelize",
                 (
                     "Use plan.apply with a single manifest for multi-page "

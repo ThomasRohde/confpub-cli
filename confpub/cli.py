@@ -398,6 +398,54 @@ def config_inspect() -> None:
 
 
 # ---------------------------------------------------------------------------
+# search command (top-level, not in a subgroup)
+# ---------------------------------------------------------------------------
+
+
+@app.command("search")
+def search(
+    cql: Optional[str] = typer.Option(None, "--cql", help="Raw CQL query"),
+    space: Optional[str] = typer.Option(None, "--space", help="Filter by space key"),
+    content_type: Optional[str] = typer.Option(None, "--type", help="Filter by content type (page, blogpost, etc.)"),
+    limit: int = typer.Option(25, "--limit", help="Maximum results to return"),
+    start: int = typer.Option(0, "--start", help="Starting offset for pagination"),
+    include_archived: bool = typer.Option(False, "--include-archived", help="Include results from archived spaces"),
+    excerpt_length: int = typer.Option(200, "--excerpt-length", help="Max excerpt chars (0 = unlimited)"),
+) -> None:
+    """Search Confluence content using CQL."""
+    target = {"cql": cql, "space": space, "type": content_type}
+    with command_context("search", target=target) as ctx:
+        # Build effective CQL from flags
+        fragments: list[str] = []
+        if space:
+            fragments.append(f'space = "{space}"')
+        if content_type:
+            fragments.append(f'type = "{content_type}"')
+        if cql:
+            fragments.append(f"({cql})")
+
+        if not fragments:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "At least one of --cql, --space, or --type is required",
+            )
+
+        effective_cql = " AND ".join(fragments)
+
+        from confpub.confluence import build_client
+        client = build_client()
+        result = client.search(
+            effective_cql,
+            start=start,
+            limit=limit,
+            include_archived_spaces=include_archived,
+            excerpt_length=excerpt_length,
+        )
+        result["cql_query"] = effective_cql
+        ctx.result = result
+
+
+# ---------------------------------------------------------------------------
 # guide command (top-level, not in a subgroup)
 # ---------------------------------------------------------------------------
 

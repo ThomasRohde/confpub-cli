@@ -125,6 +125,44 @@ class TestPersonalSpaceKeyCLI:
         assert captured["space"] == "~thro"
 
 
+class TestSearchCommand:
+    def test_search_help(self):
+        result = runner.invoke(app, ["search", "--help"])
+        assert result.exit_code == 0
+        assert "--cql" in result.output
+        assert "--space" in result.output
+        assert "--type" in result.output
+        assert "--limit" in result.output
+        assert "--start" in result.output
+        assert "--include-archived" in result.output
+
+    def test_search_no_args_validation_error(self):
+        result = runner.invoke(app, ["search"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_REQUIRED"
+
+    def test_search_cql_echoed_in_result(self, monkeypatch):
+        def fake_search(self, cql, *, start=0, limit=25, include_archived_spaces=False, excerpt_length=200):
+            return {"results": [], "total": 0, "start": start, "limit": limit, "has_more": False}
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "search", fake_search)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+
+        result = runner.invoke(app, ["search", "--space", "DEV", "--cql", 'label = "api-docs"'])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        assert data["result"]["cql_query"] == 'space = "DEV" AND (label = "api-docs")'
+
+    def test_search_in_main_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "search" in result.output
+
+
 class TestEnvelopeContract:
     def test_guide_returns_full_envelope(self):
         result = runner.invoke(app, ["guide"])

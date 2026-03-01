@@ -12,7 +12,7 @@ class TestBuildGuide:
     def test_all_commands_present(self):
         guide = build_guide()
         expected_commands = [
-            "guide",
+            "guide", "search",
             "page.list", "page.inspect", "page.publish", "page.delete",
             "space.list",
             "attachment.list", "attachment.upload",
@@ -38,7 +38,7 @@ class TestBuildGuide:
 
     def test_read_commands_are_not_mutating(self):
         guide = build_guide()
-        for cmd_id in ("page.list", "page.inspect", "space.list", "plan.validate"):
+        for cmd_id in ("search", "page.list", "page.inspect", "space.list", "plan.validate"):
             assert guide["commands"][cmd_id]["mutates"] is False
 
     def test_plan_apply_has_safety_flags(self):
@@ -47,6 +47,18 @@ class TestBuildGuide:
         assert "safety_flags" in cmd
         assert "--skip-fingerprint-check" in cmd["safety_flags"]
         assert "--cascade" in cmd["safety_flags"]
+
+    def test_search_guide_entry(self):
+        guide = build_guide()
+        cmd = guide["commands"]["search"]
+        assert cmd["group"] == "read"
+        assert cmd["mutates"] is False
+        assert "--cql" in cmd["flags"]
+        assert "--space" in cmd["flags"]
+        assert "--type" in cmd["flags"]
+        assert "result_schema" in cmd
+        assert "examples" in cmd
+        assert len(cmd["examples"]) > 0
 
     def test_all_error_codes_present(self):
         guide = build_guide()
