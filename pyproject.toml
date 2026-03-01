@@ -3,12 +3,33 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "confpub"
-version = "0.1.0"
+name = "confpub-cli"
+dynamic = ["version"]
 description = "Agent-first CLI to publish Markdown to Confluence"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Thomas Klok Rohde", email = "rohde.thomas@gmail.com" },
+]
+keywords = ["confluence", "markdown", "cli", "documentation", "publishing", "atlassian"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Documentation",
+    "Topic :: Office/Business",
+    "Typing :: Typed",
+]
 dependencies = [
     "typer[all]>=0.9",
     "pydantic>=2.0",
@@ -19,6 +40,11 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/ThomasRohde/confpub-cli"
+Repository = "https://github.com/ThomasRohde/confpub-cli.git"
+Issues = "https://github.com/ThomasRohde/confpub-cli/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
@@ -27,6 +53,12 @@ dev = [
 
 [project.scripts]
 confpub = "confpub.cli:run"
+
+[tool.hatch.version]
+path = "confpub/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["confpub"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

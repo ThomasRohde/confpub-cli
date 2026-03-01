@@ -37,7 +37,7 @@ def load_lockfile(path: str | Path) -> Lockfile | None:
     if not p.exists():
         return None
     try:
-        data = json.loads(p.read_text())
+        data = json.loads(p.read_text(encoding="utf-8"))
         # Convert raw page dicts to LockPageEntry
         pages = {}
         for title, entry in data.get("pages", {}).items():
@@ -73,7 +73,7 @@ def save_lockfile(path: str | Path, lockfile: Lockfile) -> None:
     try:
         with os.fdopen(fd, "w") as f:
             f.write(content)
-        os.rename(tmp_path, str(p))
+        os.replace(tmp_path, str(p))
     except Exception:
         # Clean up temp file on failure
         try:

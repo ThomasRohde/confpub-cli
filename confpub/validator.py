@@ -23,7 +23,7 @@ def _load_plan(plan_path: str) -> PlanArtifact:
     if not p.exists():
         raise ConfpubError(ERR_IO_FILE_NOT_FOUND, f"Plan file not found: {plan_path}")
     try:
-        data = json.loads(p.read_text())
+        data = json.loads(p.read_text(encoding="utf-8"))
         return PlanArtifact(**data)
     except ConfpubError:
         raise

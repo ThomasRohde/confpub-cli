@@ -83,7 +83,7 @@ def apply_plan(
                 )
 
         # Read and convert
-        md_text = source_path.read_text()
+        md_text = source_path.read_text(encoding="utf-8")
         storage = convert_markdown(md_text)
 
         # Discover and process assets
@@ -138,7 +138,7 @@ def apply_plan(
                     # Store backup in plan directory
                     backup_file = plan_dir / f".confpub-backup-{page.confluence_page_id}.html"
                     body = existing.get("body", {}).get("storage", {}).get("value", "")
-                    backup_file.write_text(body)
+                    backup_file.write_text(body, encoding="utf-8")
 
                 existing = client.get_page_by_id(page.confluence_page_id)
                 before_version = existing.get("version", {})

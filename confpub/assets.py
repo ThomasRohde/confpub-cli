@@ -33,6 +33,7 @@ class UploadedAsset(BaseModel):
 # Regex to find image references in markdown
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
+
 # Regex to find image URLs in storage format (from converter output)
 _STORAGE_IMAGE_RE = re.compile(
     r'<ac:image><ri:url ri:value="([^"]+)" /></ac:image>'
@@ -58,7 +59,7 @@ def discover_assets(
     seen: set[str] = set()
     assets: list[AssetRef] = []
 
-    # Find images in markdown
+    # Find images in markdown, only include files that exist on disk
     for match in _MD_IMAGE_RE.finditer(md_text):
         src = match.group(2)
         # Skip URLs
@@ -66,7 +67,7 @@ def discover_assets(
             continue
         resolved = (base / src).resolve()
         key = str(resolved)
-        if key not in seen:
+        if key not in seen and resolved.is_file():
             seen.add(key)
             assets.append(AssetRef(
                 source_path=src,

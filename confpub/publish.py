@@ -47,7 +47,7 @@ def publish_page(
     page_title = title or source_path.stem.replace("-", " ").replace("_", " ").title()
 
     # Read and convert
-    md_text = source_path.read_text()
+    md_text = source_path.read_text(encoding="utf-8")
     storage = convert_markdown(md_text)
     local_fingerprint = fingerprint_content(storage)
 
@@ -114,7 +114,7 @@ def publish_page(
             existing_data = client.get_page_by_id(existing_page_id)
             body = existing_data.get("body", {}).get("storage", {}).get("value", "")
             backup_file = source_path.parent / f".confpub-backup-{existing_page_id}.html"
-            backup_file.write_text(body)
+            backup_file.write_text(body, encoding="utf-8")
 
         result = client.update_page(existing_page_id, page_title, storage)
         page_id = existing_page_id

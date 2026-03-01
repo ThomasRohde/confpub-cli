@@ -141,7 +141,7 @@ def load_manifest(path: str) -> Manifest:
         from confpub.errors import ERR_IO_FILE_NOT_FOUND
         raise ConfpubError(ERR_IO_FILE_NOT_FOUND, f"Manifest not found: {path}")
     try:
-        data = yaml.safe_load(p.read_text())
+        data = yaml.safe_load(p.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ConfpubError(
                 ERR_VALIDATION_MANIFEST,

@@ -112,7 +112,7 @@ def _load_config_file() -> ConfigModel:
     """Load the config file if it exists."""
     if CONFIG_FILE.exists():
         try:
-            data = json.loads(CONFIG_FILE.read_text())
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             return ConfigModel(**data)
         except (json.JSONDecodeError, Exception):
             return ConfigModel()
@@ -185,4 +185,4 @@ def set_config_value(key: str, value: str) -> None:
             f"Unknown config key: {key}. Valid keys: base_url, user, token",
         )
 
-    CONFIG_FILE.write_text(json.dumps(cfg.model_dump(exclude_none=True), indent=2))
+    CONFIG_FILE.write_text(json.dumps(cfg.model_dump(exclude_none=True), indent=2), encoding="utf-8")

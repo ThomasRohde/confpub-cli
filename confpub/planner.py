@@ -73,7 +73,7 @@ def create_plan(
             )
 
         # Read and convert markdown
-        md_text = source_path.read_text()
+        md_text = source_path.read_text(encoding="utf-8")
         storage = convert_markdown(md_text)
         local_fingerprint = fingerprint_content(storage)
 

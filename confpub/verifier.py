@@ -22,7 +22,7 @@ def _load_assertions(assertions_path: str | None, plan_path: str | None) -> list
         if not p.exists():
             raise ConfpubError(ERR_IO_FILE_NOT_FOUND, f"Assertions file not found: {assertions_path}")
         try:
-            data = json.loads(p.read_text())
+            data = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(data, list):
                 return data
             raise ConfpubError(ERR_VALIDATION_MANIFEST, "Assertions file must contain a JSON array")
@@ -34,7 +34,7 @@ def _load_assertions(assertions_path: str | None, plan_path: str | None) -> list
         p = Path(plan_path)
         if not p.exists():
             raise ConfpubError(ERR_IO_FILE_NOT_FOUND, f"Plan file not found: {plan_path}")
-        plan_data = json.loads(p.read_text())
+        plan_data = json.loads(p.read_text(encoding="utf-8"))
         # Plan doesn't contain assertions directly — return empty
         return []
 
