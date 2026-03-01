@@ -75,6 +75,8 @@ def emit_progress(step: int, total: int, message: str) -> None:
 
 
 def emit_stderr(message: str) -> None:
-    """Write a diagnostic message to stderr."""
+    """Write a diagnostic message to stderr. Suppressed in quiet mode."""
+    if is_quiet():
+        return
     sys.stderr.write(message + "\n")
     sys.stderr.flush()

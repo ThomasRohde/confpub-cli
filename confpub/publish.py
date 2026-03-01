@@ -22,6 +22,13 @@ from confpub.errors import (
 from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, update_lockfile
 
 
+def derive_title(file: str, title: str | None = None) -> str:
+    """Derive page title from explicit title or filename."""
+    if title:
+        return title
+    return Path(file).stem.replace("-", " ").replace("_", " ").title()
+
+
 def publish_page(
     file: str,
     space: str,
@@ -44,7 +51,7 @@ def publish_page(
         )
 
     # Derive title from filename if not provided
-    page_title = title or source_path.stem.replace("-", " ").replace("_", " ").title()
+    page_title = derive_title(file, title)
 
     # Read and convert
     md_text = source_path.read_text(encoding="utf-8")

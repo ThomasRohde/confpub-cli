@@ -85,6 +85,15 @@ class TestEmitProgress:
 
 class TestEmitStderr:
     def test_writes_to_stderr(self, capsys):
+        set_quiet(False)
         emit_stderr("debug info")
         captured = capsys.readouterr()
         assert "debug info" in captured.err
+        set_quiet(None)  # type: ignore[arg-type]
+
+    def test_suppressed_in_quiet_mode(self, capsys):
+        set_quiet(True)
+        emit_stderr("should not appear")
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        set_quiet(None)  # type: ignore[arg-type]

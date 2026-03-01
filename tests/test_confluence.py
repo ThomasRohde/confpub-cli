@@ -5,12 +5,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from confpub.config import ResolvedConfig
-from confpub.confluence import ConfluenceClient
+from confpub.confluence import ConfluenceClient, _slim_page
 from confpub.errors import (
     ERR_AUTH_FORBIDDEN,
     ERR_AUTH_REQUIRED,
     ERR_CONFLICT_PAGE_EXISTS,
     ERR_IO_CONNECTION,
+    ERR_IO_FILE_NOT_FOUND,
     ERR_INTERNAL_SDK,
     ConfpubError,
 )
@@ -148,8 +149,73 @@ class TestErrorTranslation:
             client.list_spaces()
         assert exc_info.value.code == ERR_IO_CONNECTION
 
+    def test_permission_error(self, client):
+        client._mock_api.get_all_spaces.side_effect = Exception(
+            "User does not have permission to view the content"
+        )
+        with pytest.raises(ConfpubError) as exc_info:
+            client.list_spaces()
+        assert exc_info.value.code == ERR_AUTH_FORBIDDEN
+
+    def test_not_found_error(self, client):
+        client._mock_api.get_all_spaces.side_effect = Exception("404 Not Found")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.list_spaces()
+        assert exc_info.value.code == ERR_IO_FILE_NOT_FOUND
+
     def test_generic_error(self, client):
         client._mock_api.get_all_spaces.side_effect = Exception("Something weird happened")
         with pytest.raises(ConfpubError) as exc_info:
             client.list_spaces()
         assert exc_info.value.code == ERR_INTERNAL_SDK
+
+
+class TestSlimPage:
+    def test_extracts_basic_fields(self):
+        page = {"id": "123", "title": "Test Page", "_expandable": {"stuff": "..."}}
+        result = _slim_page(page)
+        assert result == {"id": "123", "title": "Test Page"}
+        assert "_expandable" not in result
+
+    def test_extracts_version(self):
+        page = {
+            "id": "123",
+            "title": "Test",
+            "version": {
+                "number": 5,
+                "when": "2025-01-01T00:00:00Z",
+                "by": {"displayName": "Alice", "profilePicture": "/avatar.png"},
+                "minorEdit": False,
+            },
+        }
+        result = _slim_page(page)
+        assert result["version"] == {
+            "number": 5,
+            "when": "2025-01-01T00:00:00Z",
+            "by": "Alice",
+        }
+
+    def test_extracts_body_storage(self):
+        page = {
+            "id": "1",
+            "title": "T",
+            "body": {"storage": {"value": "<p>hi</p>", "representation": "storage"}},
+        }
+        result = _slim_page(page)
+        assert result["body_storage"] == "<p>hi</p>"
+
+    def test_extracts_webui_link(self):
+        page = {
+            "id": "1",
+            "title": "T",
+            "_links": {"base": "https://wiki.example.com", "webui": "/spaces/DEV/pages/1"},
+        }
+        result = _slim_page(page)
+        assert result["webui"] == "https://wiki.example.com/spaces/DEV/pages/1"
+
+    def test_omits_missing_optional_fields(self):
+        page = {"id": "1", "title": "T"}
+        result = _slim_page(page)
+        assert "version" not in result
+        assert "body_storage" not in result
+        assert "webui" not in result

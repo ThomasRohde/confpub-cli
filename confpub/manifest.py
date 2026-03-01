@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from confpub.errors import ERR_VALIDATION_MANIFEST, ConfpubError
 
@@ -150,6 +150,18 @@ def load_manifest(path: str) -> Manifest:
         return Manifest(**data)
     except ConfpubError:
         raise
+    except ValidationError as exc:
+        details = {
+            "validation_errors": [
+                {"field": ".".join(str(loc) for loc in e["loc"]), "message": e["msg"]}
+                for e in exc.errors()
+            ]
+        }
+        raise ConfpubError(
+            ERR_VALIDATION_MANIFEST,
+            f"Invalid manifest: {len(exc.errors())} validation error(s)",
+            details=details,
+        ) from exc
     except Exception as exc:
         raise ConfpubError(
             ERR_VALIDATION_MANIFEST,

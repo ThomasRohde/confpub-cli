@@ -170,6 +170,39 @@ class TestResolvePageTree:
         assert flat[0].assets == ["img/*.png"]
 
 
+class TestManifestValidationErrors:
+    def test_pydantic_errors_are_clean(self, tmp_path):
+        """Pydantic ValidationError should produce clean details, not raw internals."""
+        f = tmp_path / "bad_manifest.yaml"
+        # conflict_strategy only allows "fail", "overwrite", "skip"
+        f.write_text("space: DEV\nparent: Root\nconflict_strategy: invalid_value\n")
+        with pytest.raises(ConfpubError) as exc_info:
+            load_manifest(str(f))
+        err = exc_info.value
+        assert err.code == ERR_VALIDATION_MANIFEST
+        assert "validation error" in err.error_message
+        assert "validation_errors" in err.details
+        for entry in err.details["validation_errors"]:
+            assert "field" in entry
+            assert "message" in entry
+            # Should not contain raw Pydantic internals
+            assert "input_value" not in str(entry)
+            assert "pydantic" not in str(entry).lower()
+
+    def test_missing_required_fields(self, tmp_path):
+        """Missing required fields produce clean validation errors."""
+        f = tmp_path / "minimal.yaml"
+        f.write_text("labels: []\n")  # missing space and parent
+        with pytest.raises(ConfpubError) as exc_info:
+            load_manifest(str(f))
+        err = exc_info.value
+        assert err.code == ERR_VALIDATION_MANIFEST
+        assert "validation_errors" in err.details
+        fields = [e["field"] for e in err.details["validation_errors"]]
+        assert "space" in fields
+        assert "parent" in fields
+
+
 class TestPlanArtifact:
     def test_create_plan(self):
         plan = PlanArtifact(

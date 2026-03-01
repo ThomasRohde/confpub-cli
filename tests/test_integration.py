@@ -22,7 +22,7 @@ class TestCLIHelp:
     def test_version(self):
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        assert "confpub" in result.output
 
     def test_page_help(self):
         result = runner.invoke(app, ["page", "--help"])

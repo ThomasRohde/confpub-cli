@@ -16,7 +16,7 @@ import typer
 from confpub import __version__
 from confpub.envelope import Envelope
 from confpub.errors import ConfpubError, exit_code_for, ERR_INTERNAL_SDK
-from confpub.output import emit_stderr, emit_stdout, set_quiet, set_verbose
+from confpub.output import emit_stderr, emit_stdout, is_verbose, set_quiet, set_verbose
 
 # ---------------------------------------------------------------------------
 # Subcommand group apps
@@ -101,6 +101,9 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
     except ConfpubError as e:
         duration_ms = int((time.monotonic() - start) * 1000)
         ctx.metrics["duration_ms"] = duration_ms
+        if is_verbose():
+            import traceback as tb
+            ctx.metrics["diagnostics"] = {"traceback": tb.format_exc()}
         envelope = Envelope.failure(
             command_name,
             [e],
@@ -133,6 +136,12 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
     else:
         duration_ms = int((time.monotonic() - start) * 1000)
         ctx.metrics["duration_ms"] = duration_ms
+        if is_verbose():
+            ctx.metrics["diagnostics"] = {
+                "command": command_name,
+                "target": ctx.target,
+                "warning_count": len(ctx.warnings),
+            }
         envelope = Envelope.success(
             command_name,
             ctx.result,
@@ -154,11 +163,10 @@ def page_list(
 ) -> None:
     """List pages in a Confluence space."""
     with command_context("page.list", target={"space": space}) as ctx:
-        # Phase 6: delegate to confluence.list_pages
-        from confpub.confluence import build_client
+        from confpub.confluence import build_client, _slim_page
         client = build_client()
         pages = client.list_pages(space)
-        ctx.result = {"pages": pages}
+        ctx.result = {"pages": [_slim_page(p) for p in pages]}
 
 
 @page_app.command("inspect")
@@ -166,10 +174,11 @@ def page_inspect(
     space: str = typer.Option(None, "--space", help="Confluence space key"),
     title: str = typer.Option(None, "--title", help="Page title"),
     page_id: str = typer.Option(None, "--page-id", help="Confluence page ID"),
+    raw: bool = typer.Option(False, "--raw", help="Return full raw API response"),
 ) -> None:
     """Inspect a Confluence page."""
     with command_context("page.inspect", target={"space": space, "title": title, "page_id": page_id}) as ctx:
-        from confpub.confluence import build_client
+        from confpub.confluence import build_client, _slim_page
         client = build_client()
         if page_id:
             page = client.get_page_by_id(page_id)
@@ -178,7 +187,7 @@ def page_inspect(
             if not space or not title:
                 raise validation_error(ERR_VALIDATION_REQUIRED, "Either --page-id or both --space and --title are required")
             page = client.get_page(space, title)
-        ctx.result = page
+        ctx.result = page if raw else _slim_page(page) if page else page
 
 
 @page_app.command("publish")
@@ -186,12 +195,14 @@ def page_publish(
     file: str = typer.Argument(..., help="Markdown file to publish"),
     space: str = typer.Option(..., "--space", help="Confluence space key"),
     parent: str = typer.Option(..., "--parent", help="Parent page title"),
-    title: Optional[str] = typer.Option(None, "--title", help="Page title (defaults to filename)"),
+    title: Optional[str] = typer.Option(None, "--title", help="Page title (defaults to filename stem, hyphen/underscore→spaces, title-cased)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
     backup: bool = typer.Option(False, "--backup", help="Backup existing page before overwriting"),
 ) -> None:
     """Publish a single Markdown file to Confluence."""
-    target = {"space": space, "title": title or file, "file": file}
+    from confpub.publish import derive_title
+    resolved_title = derive_title(file, title)
+    target = {"space": space, "title": resolved_title, "file": file}
     with command_context("page.publish", target=target) as ctx:
         from confpub.publish import publish_page
         result = publish_page(
@@ -329,7 +340,7 @@ def auth_inspect() -> None:
 
 @config_app.command("set")
 def config_set(
-    key: str = typer.Argument(..., help="Configuration key"),
+    key: str = typer.Argument(..., help="Configuration key (base_url, user, token)"),
     value: str = typer.Argument(..., help="Configuration value"),
 ) -> None:
     """Set a configuration value."""

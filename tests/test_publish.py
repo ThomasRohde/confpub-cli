@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from confpub.errors import ConfpubError, ERR_IO_FILE_NOT_FOUND
-from confpub.publish import publish_page
+from confpub.publish import derive_title, publish_page
 
 
 @pytest.fixture
@@ -28,6 +28,23 @@ def mock_client():
         "body": {"storage": {"value": "<p>old</p>"}},
     }
     return client
+
+
+class TestDeriveTitle:
+    def test_explicit_title_wins(self):
+        assert derive_title("some-file.md", "My Custom Title") == "My Custom Title"
+
+    def test_derives_from_filename(self):
+        assert derive_title("my-cool-page.md") == "My Cool Page"
+
+    def test_underscores_to_spaces(self):
+        assert derive_title("api_reference.md") == "Api Reference"
+
+    def test_mixed_separators(self):
+        assert derive_title("my-api_docs.md") == "My Api Docs"
+
+    def test_path_uses_stem_only(self):
+        assert derive_title("docs/subfolder/overview.md") == "Overview"
 
 
 class TestPublishDryRun:

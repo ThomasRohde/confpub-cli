@@ -59,6 +59,20 @@ class ConfluenceClient:
             raise ConfpubError(ERR_IO_TIMEOUT, f"Request timed out: {msg}") from exc
         if "ConnectionError" in msg or "connection" in msg.lower():
             raise ConfpubError(ERR_IO_CONNECTION, f"Connection failed: {msg}") from exc
+        # Permission denied (e.g., nonexistent space, restricted content)
+        if "permission" in msg.lower() or "not permitted" in msg.lower():
+            raise ConfpubError(
+                ERR_AUTH_FORBIDDEN,
+                f"Permission denied ({context}): {msg}",
+                suggested_action="escalate",
+            ) from exc
+        # Not found (404 or explicit "not found")
+        if "404" in msg or "not found" in msg.lower():
+            from confpub.errors import ERR_IO_FILE_NOT_FOUND
+            raise ConfpubError(
+                ERR_IO_FILE_NOT_FOUND,
+                f"Resource not found ({context}): {msg}",
+            ) from exc
         raise ConfpubError(ERR_INTERNAL_SDK, f"Unexpected API error ({context}): {msg}") from exc
 
     # ------------------------------------------------------------------
@@ -227,6 +241,29 @@ class ConfluenceClient:
             return hashlib.sha256(body.encode("utf-8")).hexdigest()
         except Exception:
             return None
+
+
+def _slim_page(page: dict[str, Any]) -> dict[str, Any]:
+    """Extract agent-relevant fields from a raw Confluence page object."""
+    result: dict[str, Any] = {
+        "id": page.get("id"),
+        "title": page.get("title"),
+    }
+    version = page.get("version")
+    if isinstance(version, dict):
+        result["version"] = {
+            "number": version.get("number"),
+            "when": version.get("when"),
+            "by": version.get("by", {}).get("displayName") if isinstance(version.get("by"), dict) else None,
+        }
+    body = page.get("body", {}).get("storage", {}).get("value")
+    if body is not None:
+        result["body_storage"] = body
+    links = page.get("_links", {})
+    if "webui" in links:
+        base = links.get("base", "")
+        result["webui"] = base + links["webui"]
+    return result
 
 
 def build_client(
