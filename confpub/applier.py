@@ -125,8 +125,7 @@ def apply_plan(
                     counts["attachments_upload"] += len(assets)
 
                 # Update lockfile and parent tracking
-                update_lockfile(lockfile, page.title, new_id, new_version if isinstance(new_version, int) else 1)
-                lockfile.pages[page.title].content_fingerprint = fingerprint_content(storage)
+                update_lockfile(lockfile, page.title, new_id, new_version if isinstance(new_version, int) else 1, content_fingerprint=fingerprint_content(storage))
                 parent_ids[page.title] = new_id
 
             counts["create"] += 1
@@ -180,8 +179,8 @@ def apply_plan(
                 update_lockfile(
                     lockfile, page.title, page.confluence_page_id,
                     new_version if isinstance(new_version, int) else 1,
+                    content_fingerprint=fingerprint_content(storage),
                 )
-                lockfile.pages[page.title].content_fingerprint = fingerprint_content(storage)
                 parent_ids[page.title] = page.confluence_page_id
 
             counts["update"] += 1

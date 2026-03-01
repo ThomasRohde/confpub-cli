@@ -194,8 +194,7 @@ def publish_page(
 
     # Update lockfile
     new_version_int = new_version if isinstance(new_version, int) else 1
-    update_lockfile(lockfile, page_title, page_id, new_version_int)
-    lockfile.pages[page_title].content_fingerprint = local_fingerprint
+    update_lockfile(lockfile, page_title, page_id, new_version_int, content_fingerprint=local_fingerprint)
     save_lockfile(lockfile_path, lockfile)
 
     change = {

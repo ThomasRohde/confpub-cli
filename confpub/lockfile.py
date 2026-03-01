@@ -86,9 +86,12 @@ def save_lockfile(path: str | Path, lockfile: Lockfile) -> None:
 
 def update_lockfile(
     lockfile: Lockfile, title: str, page_id: str, version: int,
+    content_fingerprint: str | None = None,
 ) -> Lockfile:
     """Update a page entry in the lockfile."""
-    lockfile.pages[title] = LockPageEntry(page_id=page_id, version=version)
+    lockfile.pages[title] = LockPageEntry(
+        page_id=page_id, version=version, content_fingerprint=content_fingerprint,
+    )
     return lockfile
 
 
@@ -101,3 +104,18 @@ def remove_from_lockfile(lockfile: Lockfile, title: str) -> bool:
         del lockfile.pages[title]
         return True
     return False
+
+
+def remove_by_page_ids(lockfile: Lockfile, page_ids: set[str], title: str | None = None) -> bool:
+    """Remove lockfile entries matching any of the given page IDs, plus an optional title.
+
+    Returns True if any entries were removed.
+    """
+    removed = False
+    if title:
+        removed = remove_from_lockfile(lockfile, title) or removed
+    for lf_title, entry in list(lockfile.pages.items()):
+        if entry.page_id in page_ids:
+            del lockfile.pages[lf_title]
+            removed = True
+    return removed

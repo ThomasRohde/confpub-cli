@@ -237,12 +237,6 @@ def page_publish(
     if page_id:
         target["page_id"] = page_id
     with command_context("page.publish", target=target) as ctx:
-        from pathlib import Path as _Path
-        if not _Path(file).exists():
-            raise ConfpubError(
-                "ERR_IO_FILE_NOT_FOUND",
-                f"File not found: {file}",
-            )
         if not page_id and not parent:
             raise ConfpubError(
                 "ERR_VALIDATION_REQUIRED",
@@ -316,18 +310,11 @@ def page_delete(
         from confpub.confluence import build_client
         client = build_client()
 
-        # Collect page IDs that will be deleted (for lockfile cleanup)
+        # Collect descendant IDs before deleting (for lockfile cleanup)
         deleted_ids: set[str] = set()
         if page_id:
             if cascade:
-                # Collect descendant IDs before deleting
-                def _collect_ids(pid: str) -> None:
-                    children = client.get_page_children(pid)
-                    for child in children:
-                        cid = str(child["id"])
-                        deleted_ids.add(cid)
-                        _collect_ids(cid)
-                _collect_ids(page_id)
+                deleted_ids.update(client.get_descendant_ids(page_id))
                 client._delete_descendants(page_id)
             deleted_ids.add(page_id)
             result = client.delete_page(page_id)
@@ -336,32 +323,17 @@ def page_delete(
                 page = client.get_page(space, title)
                 if page:
                     pid = str(page["id"])
-                    def _collect_ids_by_title(p: str) -> None:
-                        children = client.get_page_children(p)
-                        for child in children:
-                            cid = str(child["id"])
-                            deleted_ids.add(cid)
-                            _collect_ids_by_title(cid)
-                    _collect_ids_by_title(pid)
+                    deleted_ids.update(client.get_descendant_ids(pid))
                     deleted_ids.add(pid)
             result = client.delete_page_by_title(space, title, cascade=cascade)
 
         # Clean up lockfile entries for deleted pages
         from pathlib import Path
-        from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, remove_from_lockfile
+        from confpub.lockfile import load_lockfile, save_lockfile, remove_by_page_ids
         lockfile_path = Path.cwd() / "confpub.lock"
         lockfile = load_lockfile(lockfile_path)
-        if lockfile:
-            removed = False
-            if title and not page_id:
-                removed = remove_from_lockfile(lockfile, title) or removed
-            # Remove entries matching any deleted page ID
-            for lf_title, entry in list(lockfile.pages.items()):
-                if entry.page_id in deleted_ids:
-                    remove_from_lockfile(lockfile, lf_title)
-                    removed = True
-            if removed:
-                save_lockfile(lockfile_path, lockfile)
+        if lockfile and remove_by_page_ids(lockfile, deleted_ids, title=title if not page_id else None):
+            save_lockfile(lockfile_path, lockfile)
 
         ctx.result = result
 

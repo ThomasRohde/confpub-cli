@@ -187,6 +187,16 @@ class ConfluenceClient:
             self._delete_descendants(page_id)
         return self.delete_page(page_id)
 
+    def get_descendant_ids(self, page_id: str) -> set[str]:
+        """Recursively collect all descendant page IDs."""
+        ids: set[str] = set()
+        children = self.get_page_children(page_id)
+        for child in children:
+            child_id = str(child["id"])
+            ids.add(child_id)
+            ids.update(self.get_descendant_ids(child_id))
+        return ids
+
     def _delete_descendants(self, page_id: str) -> None:
         """Recursively delete all descendants depth-first (leaves first)."""
         children = self.get_page_children(page_id)
