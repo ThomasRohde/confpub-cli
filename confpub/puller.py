@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from confpub.confluence import ConfluenceClient, build_client
+from confpub.output import emit_stderr
 from confpub.errors import (
     ERR_CONFLICT_FILE_EXISTS,
     ERR_VALIDATION_NOT_FOUND,
@@ -45,6 +46,8 @@ def _collect_tree(
 
     def _walk(pid: str, parent_id: str | None) -> None:
         children = client.get_page_children_deep(pid)
+        if children:
+            emit_stderr(f"Found {len(children)} child page(s) under {pid}")
         for child in children:
             child_id = str(child["id"])
             pages.append({
@@ -223,6 +226,7 @@ def pull_pages(
     force: bool = False,
     layout: str = "flat",
     include_attachments: bool = True,
+    generate_manifest: bool = False,
 ) -> dict[str, Any]:
     """Pull pages from Confluence to local Markdown files.
 
@@ -302,9 +306,9 @@ def pull_pages(
             "attachments_downloaded": attachments_downloaded,
         })
 
-    # Generate manifest if recursive
+    # Generate manifest if requested or recursive with multiple pages
     manifest_file: str | None = None
-    if recursive and len(all_pages) > 1:
+    if generate_manifest or (recursive and len(all_pages) > 1):
         root_title = root_page.get("title", "")
         page_tree = _build_page_tree(all_pages, file_paths, root_id)
         manifest_yaml = generate_manifest_yaml(root_space, root_title, page_tree)

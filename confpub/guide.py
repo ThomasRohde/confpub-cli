@@ -26,7 +26,9 @@ from confpub.errors import (
     ERR_VALIDATION_ASSET_MISSING,
     ERR_VALIDATION_MANIFEST,
     ERR_VALIDATION_MARKDOWN,
+    ERR_VALIDATION_NOT_FOUND,
     ERR_VALIDATION_REQUIRED,
+    ERR_VALIDATION_SPACE_MISMATCH,
     exit_code_for,
     retryable_for,
     suggested_action_for,
@@ -103,7 +105,7 @@ def build_guide() -> dict[str, Any]:
                 "flags": [
                     "--space", "--title", "--page-id",
                     "--output", "--recursive", "--force",
-                    "--layout", "--no-attachments",
+                    "--layout", "--no-attachments", "--manifest",
                 ],
                 "safety_flags": {
                     "--force": "Overwrites existing local files without confirmation",
@@ -194,6 +196,8 @@ def build_guide() -> dict[str, Any]:
             ERR_VALIDATION_MANIFEST: _error_code_entry(ERR_VALIDATION_MANIFEST),
             ERR_VALIDATION_MARKDOWN: _error_code_entry(ERR_VALIDATION_MARKDOWN),
             ERR_VALIDATION_ASSET_MISSING: _error_code_entry(ERR_VALIDATION_ASSET_MISSING),
+            ERR_VALIDATION_NOT_FOUND: _error_code_entry(ERR_VALIDATION_NOT_FOUND),
+            ERR_VALIDATION_SPACE_MISMATCH: _error_code_entry(ERR_VALIDATION_SPACE_MISMATCH),
             ERR_AUTH_REQUIRED: _error_code_entry(ERR_AUTH_REQUIRED),
             ERR_AUTH_EXPIRED: _error_code_entry(ERR_AUTH_EXPIRED),
             ERR_AUTH_FORBIDDEN: _error_code_entry(ERR_AUTH_FORBIDDEN),

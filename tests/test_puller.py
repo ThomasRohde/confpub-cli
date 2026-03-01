@@ -446,3 +446,81 @@ class TestLockfile:
         assert "Test Page" in data["pages"]
         assert data["pages"]["Test Page"]["page_id"] == "1"
         assert data["pages"]["Test Page"]["version"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Multi-level recursive pull (Bug 1 verification)
+# ---------------------------------------------------------------------------
+
+
+class TestMultiLevelRecursivePull:
+    def test_three_level_tree(self, tmp_path):
+        """Verify that recursive pull collects grandchildren (3-level tree)."""
+        root = _make_page("1", "Root")
+        child = _make_page("2", "Child")
+        grandchild = _make_page("3", "Grandchild", "<p>Deep content</p>")
+
+        pages = {"1": root, "2": child, "3": grandchild}
+        children = {"1": [child], "2": [grandchild]}
+        client = _mock_client(pages, children)
+
+        with patch("confpub.puller.build_client", return_value=client):
+            result = pull_pages(
+                page_id="1",
+                output_dir=str(tmp_path),
+                recursive=True,
+            )
+
+        assert result["summary"]["pages_pulled"] == 3
+        assert (tmp_path / "root.md").exists()
+        assert (tmp_path / "child.md").exists()
+        assert (tmp_path / "grandchild.md").exists()
+        gc_content = (tmp_path / "grandchild.md").read_text()
+        assert "Deep content" in gc_content
+
+    def test_page_id_recursive_combination(self, tmp_path):
+        """--page-id + --recursive should collect the full subtree."""
+        root = _make_page("10", "Project")
+        child1 = _make_page("20", "Sub A")
+        child2 = _make_page("30", "Sub B")
+
+        pages = {"10": root, "20": child1, "30": child2}
+        children = {"10": [child1, child2]}
+        client = _mock_client(pages, children)
+
+        with patch("confpub.puller.build_client", return_value=client):
+            result = pull_pages(
+                page_id="10",
+                output_dir=str(tmp_path),
+                recursive=True,
+            )
+
+        assert result["summary"]["pages_pulled"] == 3
+        titles = {f["title"] for f in result["files"]}
+        assert titles == {"Project", "Sub A", "Sub B"}
+
+
+# ---------------------------------------------------------------------------
+# Manifest generation flag (Issue 9 verification)
+# ---------------------------------------------------------------------------
+
+
+class TestManifestFlag:
+    def test_single_page_with_manifest_flag(self, tmp_path):
+        """--manifest generates confpub.yaml even for a single page."""
+        page = _make_page("1", "Solo Page")
+        client = _mock_client({"1": page})
+
+        with patch("confpub.puller.build_client", return_value=client):
+            result = pull_pages(
+                page_id="1",
+                output_dir=str(tmp_path),
+                generate_manifest=True,
+            )
+
+        assert result["summary"]["manifest_generated"] is True
+        assert result["manifest_file"] is not None
+        manifest = Path(result["manifest_file"])
+        assert manifest.exists()
+        content = manifest.read_text()
+        assert "Solo Page" in content

@@ -94,6 +94,30 @@ class TestDeletePage:
         assert result["deleted"] is True
 
 
+class TestCascadeDelete:
+    def test_cascade_deletes_three_level_tree(self, client):
+        """Cascade should delete grandchildren before children (depth-first)."""
+        # Root -> Child -> Grandchild
+        client._mock_api.get_page_by_title.return_value = {"id": "1", "title": "Root"}
+
+        def get_children(page_id, **kwargs):
+            if page_id == "1":
+                return [{"id": "2", "title": "Child"}]
+            if page_id == "2":
+                return [{"id": "3", "title": "Grandchild"}]
+            return []
+
+        client._mock_api.get_page_child_by_type.side_effect = get_children
+        client._mock_api.remove_page.return_value = None
+
+        result = client.delete_page_by_title("DEV", "Root", cascade=True)
+
+        assert result["deleted"] is True
+        # Verify deletion order: grandchild first, then child, then root
+        delete_calls = [str(call.args[0]) for call in client._mock_api.remove_page.call_args_list]
+        assert delete_calls == ["3", "2", "1"]
+
+
 class TestListSpaces:
     def test_returns_spaces(self, client):
         client._mock_api.get_all_spaces.return_value = {

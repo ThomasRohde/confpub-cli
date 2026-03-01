@@ -137,11 +137,22 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
         duration_ms = int((time.monotonic() - start) * 1000)
         ctx.metrics["duration_ms"] = duration_ms
         if is_verbose():
-            ctx.metrics["diagnostics"] = {
+            import sys
+            from confpub.config import load_config as _load_verbose_config
+
+            diag: dict[str, Any] = {
                 "command": command_name,
                 "target": ctx.target,
                 "warning_count": len(ctx.warnings),
+                "python_version": sys.version,
+                "confpub_version": __version__,
             }
+            try:
+                _vcfg = _load_verbose_config()
+                diag["confluence_url"] = _vcfg.base_url
+            except Exception:
+                pass
+            ctx.metrics["diagnostics"] = diag
         envelope = Envelope.success(
             command_name,
             ctx.result,
@@ -230,6 +241,7 @@ def page_pull(
     force: bool = typer.Option(False, "--force", help="Overwrite existing files"),
     layout: str = typer.Option("flat", "--layout", help="Output layout: flat or nested"),
     no_attachments: bool = typer.Option(False, "--no-attachments", help="Skip downloading attachments"),
+    manifest: bool = typer.Option(False, "--manifest", help="Generate confpub.yaml manifest"),
 ) -> None:
     """Pull Confluence pages to local Markdown files."""
     target = {"space": space, "title": title, "page_id": page_id}
@@ -250,6 +262,7 @@ def page_pull(
             force=force,
             layout=layout,
             include_attachments=not no_attachments,
+            generate_manifest=manifest,
         )
         ctx.warnings.extend(result.pop("warnings", []))
         ctx.result = result
@@ -285,10 +298,10 @@ def attachment_list(
 ) -> None:
     """List attachments on a Confluence page."""
     with command_context("attachment.list", target={"page_id": page_id}) as ctx:
-        from confpub.confluence import build_client
+        from confpub.confluence import build_client, _slim_attachment
         client = build_client()
         attachments = client.get_attachments(page_id)
-        ctx.result = {"attachments": attachments}
+        ctx.result = {"attachments": [_slim_attachment(a) for a in attachments]}
 
 
 @attachment_app.command("upload")
@@ -364,6 +377,8 @@ def plan_verify(
     with command_context("plan.verify", target={"assertions": assertions}) as ctx:
         from confpub.verifier import verify_assertions
         result = verify_assertions(assertions_path=assertions, plan_path=plan)
+        if not result.get("results"):
+            ctx.warnings.append("No assertions were verified — result is vacuously true")
         ctx.result = result
 
 

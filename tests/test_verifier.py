@@ -57,6 +57,7 @@ class TestVerifyAssertions:
         result = verify_assertions()
         assert result["all_passed"] is True
         assert result["results"] == []
+        assert result["note"] == "No assertions defined; nothing was verified."
 
     def test_missing_assertions_file(self):
         with pytest.raises(ConfpubError) as exc_info:

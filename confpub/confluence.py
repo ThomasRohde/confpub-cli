@@ -6,6 +6,7 @@ Provides a clean interface that translates library exceptions into ConfpubError.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from typing import Any
 
@@ -28,6 +29,13 @@ class ConfluenceClient:
         config.require_credentials()
         self._config = config
         self._api = self._build_api(config)
+        self._call_count = 0
+
+        # Suppress noisy atlassian-python-api logging (e.g. "Can't find 'X' page")
+        from confpub.output import is_quiet
+
+        atlassian_logger = logging.getLogger("atlassian")
+        atlassian_logger.setLevel(logging.CRITICAL if is_quiet() else logging.WARNING)
 
     @staticmethod
     def _build_api(config: ResolvedConfig) -> Any:
@@ -83,6 +91,7 @@ class ConfluenceClient:
 
     def get_page(self, space: str, title: str) -> dict[str, Any] | None:
         """Get a page by space key and title."""
+        self._call_count += 1
         try:
             result = self._api.get_page_by_title(space, title, expand="version,body.storage,space")
             return result if result else None
@@ -92,6 +101,7 @@ class ConfluenceClient:
 
     def get_page_by_id(self, page_id: str) -> dict[str, Any]:
         """Get a page by its Confluence ID."""
+        self._call_count += 1
         try:
             return self._api.get_page_by_id(page_id, expand="version,body.storage,space")
         except Exception as exc:
@@ -106,6 +116,7 @@ class ConfluenceClient:
         parent_id: str | None = None,
     ) -> dict[str, Any]:
         """Create a new page."""
+        self._call_count += 1
         try:
             return self._api.create_page(
                 space=space,
@@ -135,6 +146,7 @@ class ConfluenceClient:
         version_comment: str | None = None,
     ) -> dict[str, Any]:
         """Update an existing page."""
+        self._call_count += 1
         try:
             return self._api.update_page(
                 page_id=page_id,
@@ -149,6 +161,7 @@ class ConfluenceClient:
 
     def delete_page(self, page_id: str) -> dict[str, Any]:
         """Delete a page by ID."""
+        self._call_count += 1
         try:
             self._api.remove_page(page_id)
             return {"deleted": True, "page_id": page_id}
@@ -169,30 +182,53 @@ class ConfluenceClient:
             )
         page_id = str(page["id"])
         if cascade:
-            children = self.get_page_children(page_id)
-            for child in children:
-                self.delete_page(str(child["id"]))
+            self._delete_descendants(page_id)
         return self.delete_page(page_id)
 
+    def _delete_descendants(self, page_id: str) -> None:
+        """Recursively delete all descendants depth-first (leaves first)."""
+        children = self.get_page_children(page_id)
+        for child in children:
+            child_id = str(child["id"])
+            self._delete_descendants(child_id)
+            self.delete_page(child_id)
+
     def get_page_children(self, page_id: str) -> list[dict[str, Any]]:
-        """Get child pages of a page."""
-        try:
-            result = self._api.get_page_child_by_type(page_id, type="page")
-            return result if isinstance(result, list) else []
-        except Exception as exc:
-            self._handle_error(exc, "get_page_children")
-            return []
+        """Get child pages of a page (with pagination)."""
+        return self._get_children_paginated(page_id)
 
     def get_page_children_deep(self, page_id: str) -> list[dict[str, Any]]:
-        """Get child pages with version and body.storage expanded."""
-        try:
-            result = self._api.get_page_child_by_type(
-                page_id, type="page", expand="version,body.storage",
-            )
-            return result if isinstance(result, list) else []
-        except Exception as exc:
-            self._handle_error(exc, "get_page_children_deep")
-            return []
+        """Get child pages with version and body.storage expanded (with pagination)."""
+        return self._get_children_paginated(page_id, expand="version,body.storage")
+
+    def _get_children_paginated(
+        self, page_id: str, *, expand: str | None = None, limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        """Fetch all child pages, handling pagination."""
+        all_children: list[dict[str, Any]] = []
+        start = 0
+        while True:
+            self._call_count += 1
+            try:
+                kwargs: dict[str, Any] = {
+                    "type": "page",
+                    "start": start,
+                    "limit": limit,
+                }
+                if expand:
+                    kwargs["expand"] = expand
+                result = self._api.get_page_child_by_type(page_id, **kwargs)
+                batch = result if isinstance(result, list) else []
+            except Exception as exc:
+                self._handle_error(exc, "get_page_children")
+                return all_children
+            if not batch:
+                break
+            all_children.extend(batch)
+            if len(batch) < limit:
+                break
+            start += limit
+        return all_children
 
     # ------------------------------------------------------------------
     # Space operations
@@ -200,17 +236,23 @@ class ConfluenceClient:
 
     def list_spaces(self) -> list[dict[str, Any]]:
         """List accessible spaces."""
+        self._call_count += 1
         try:
             result = self._api.get_all_spaces(expand="description.plain")
             if isinstance(result, dict):
-                return result.get("results", [])
-            return result if isinstance(result, list) else []
+                raw = result.get("results", [])
+            elif isinstance(result, list):
+                raw = result
+            else:
+                raw = []
+            return [_slim_space(s) for s in raw]
         except Exception as exc:
             self._handle_error(exc, "list_spaces")
             return []
 
     def list_pages(self, space: str) -> list[dict[str, Any]]:
         """List pages in a space."""
+        self._call_count += 1
         try:
             result = self._api.get_all_pages_from_space(space, expand="version")
             return result if isinstance(result, list) else []
@@ -224,6 +266,7 @@ class ConfluenceClient:
 
     def get_attachments(self, page_id: str) -> list[dict[str, Any]]:
         """List attachments on a page."""
+        self._call_count += 1
         try:
             result = self._api.get_attachments_from_content(page_id)
             if isinstance(result, dict):
@@ -241,6 +284,7 @@ class ConfluenceClient:
         raise — callers can skip individual attachments without aborting the
         entire pull.
         """
+        self._call_count += 1
         import os
 
         attachments = self.get_attachments(page_id)
@@ -280,9 +324,12 @@ class ConfluenceClient:
 
     def upload_attachment(self, page_id: str, filepath: str) -> dict[str, Any]:
         """Upload an attachment to a page."""
+        self._call_count += 1
         try:
             result = self._api.attach_file(filepath, page_id=page_id)
-            return result if isinstance(result, dict) else {"uploaded": True, "file": filepath}
+            if isinstance(result, dict):
+                return _slim_attachment(result)
+            return {"uploaded": True, "file": filepath}
         except Exception as exc:
             self._handle_error(exc, "upload_attachment")
             return {}
@@ -305,6 +352,7 @@ class ConfluenceClient:
         Returns a dict with keys: results, total, start, limit, has_more.
         ``excerpt_length`` caps each excerpt at *n* characters (0 = unlimited).
         """
+        self._call_count += 1
         try:
             raw = self._api.cql(
                 cql,
@@ -346,6 +394,7 @@ class ConfluenceClient:
 
     def fingerprint_page(self, page_id: str) -> str | None:
         """Get SHA-256 fingerprint of a page's storage format body."""
+        self._call_count += 1
         try:
             page = self._api.get_page_by_id(page_id, expand="body.storage")
             body = page.get("body", {}).get("storage", {}).get("value", "")
@@ -374,6 +423,52 @@ def _slim_page(page: dict[str, Any]) -> dict[str, Any]:
     if "webui" in links:
         base = links.get("base", "")
         result["webui"] = base + links["webui"]
+    return result
+
+
+def _slim_space(space: dict[str, Any]) -> dict[str, Any]:
+    """Extract agent-relevant fields from a raw Confluence space object."""
+    result: dict[str, Any] = {
+        "id": space.get("id"),
+        "key": space.get("key"),
+        "name": space.get("name"),
+        "type": space.get("type"),
+    }
+    desc = space.get("description", {})
+    if isinstance(desc, dict):
+        plain = desc.get("plain", {})
+        if isinstance(plain, dict):
+            value = plain.get("value", "")
+            if value:
+                result["description"] = value
+    links = space.get("_links", {})
+    if "webui" in links:
+        result["webui"] = links.get("webui", "")
+    return result
+
+
+def _slim_attachment(att: dict[str, Any]) -> dict[str, Any]:
+    """Extract agent-relevant fields from a raw Confluence attachment object."""
+    result: dict[str, Any] = {
+        "id": att.get("id"),
+        "title": att.get("title"),
+    }
+    version = att.get("version")
+    if isinstance(version, dict):
+        result["version"] = version.get("number")
+    extensions = att.get("extensions", {})
+    if isinstance(extensions, dict):
+        file_size = extensions.get("fileSize")
+        if file_size is not None:
+            result["file_size"] = file_size
+        media_type = extensions.get("mediaType")
+        if media_type:
+            result["media_type"] = media_type
+    metadata = att.get("metadata", {})
+    if isinstance(metadata, dict):
+        media_type = metadata.get("mediaType")
+        if media_type and "media_type" not in result:
+            result["media_type"] = media_type
     return result
 
 

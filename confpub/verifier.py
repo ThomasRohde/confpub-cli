@@ -55,6 +55,7 @@ def verify_assertions(
         return {
             "all_passed": True,
             "results": [],
+            "note": "No assertions defined; nothing was verified.",
         }
 
     config = load_config()

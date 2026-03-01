@@ -92,10 +92,12 @@ All commands follow a `noun verb` pattern. Verbs telegraph mutation intent.
 | Command | Mutates | Description |
 |---------|---------|-------------|
 | `confpub guide` | No | Machine-readable CLI schema |
+| `confpub search` | No | Search Confluence content using CQL |
 | `confpub page list` | No | List pages in a space |
 | `confpub page inspect` | No | Detailed view of one page |
 | `confpub page publish` | **Yes** | Publish a single Markdown file |
-| `confpub page delete` | **Yes** | Delete a page |
+| `confpub page pull` | No | Pull Confluence pages to local Markdown |
+| `confpub page delete` | **Yes** | Delete a page (supports `--cascade`) |
 | `confpub space list` | No | List accessible spaces |
 | `confpub attachment list` | No | List attachments on a page |
 | `confpub attachment upload` | **Yes** | Upload a file as an attachment |
@@ -161,6 +163,59 @@ On failure, `ok` is `false`, `result` is `null`, and `errors` contains structure
 
 ---
 
+## Pulling Pages
+
+Pull Confluence pages back to local Markdown files:
+
+```bash
+# Pull a single page by title
+confpub page pull --space DEV --title "Architecture Overview" --output docs/
+
+# Pull a single page by ID
+confpub page pull --page-id 123456 --output docs/
+
+# Pull a page and all its children recursively
+confpub page pull --space DEV --title "Engineering" --recursive --output docs/
+
+# Generate a manifest even for a single page
+confpub page pull --page-id 123456 --manifest --output docs/
+```
+
+### Pull flags
+
+| Flag | Description |
+|------|-------------|
+| `--space` | Confluence space key |
+| `--title` | Page title |
+| `--page-id` | Confluence page ID (alternative to `--space` + `--title`) |
+| `--output` / `-o` | Output directory (default: `.`) |
+| `--recursive` / `-r` | Pull child pages recursively |
+| `--force` | Overwrite existing local files |
+| `--layout` | `flat` (default) or `nested` directory structure |
+| `--no-attachments` | Skip downloading attachments |
+| `--manifest` | Generate `confpub.yaml` manifest |
+
+Recursive pulls automatically generate a `confpub.yaml` manifest and a `confpub.lock` lockfile for round-tripping back to Confluence.
+
+---
+
+## Searching
+
+Search Confluence content using CQL (Confluence Query Language):
+
+```bash
+# Search by CQL
+confpub search --cql 'label = "api-docs"'
+
+# Filter by space and type
+confpub search --space DEV --type page --limit 10
+
+# Combine CQL with filters
+confpub search --space DEV --cql 'title ~ "deploy"'
+```
+
+---
+
 ## Exit Codes
 
 | Code | Meaning | Action |
@@ -183,6 +238,8 @@ ERR_VALIDATION_REQUIRED          Missing required argument
 ERR_VALIDATION_MANIFEST          Manifest fails schema validation
 ERR_VALIDATION_MARKDOWN          Unparseable Markdown
 ERR_VALIDATION_ASSET_MISSING     Referenced image not found on disk
+ERR_VALIDATION_NOT_FOUND         Page or resource not found
+ERR_VALIDATION_SPACE_MISMATCH    Space key mismatch between manifest and target
 
 ERR_AUTH_REQUIRED                No credentials configured
 ERR_AUTH_EXPIRED                 Token has expired
@@ -191,12 +248,14 @@ ERR_AUTH_FORBIDDEN               Lacks permission to write
 ERR_CONFLICT_FINGERPRINT         Page changed since plan was created
 ERR_CONFLICT_LOCK                Another confpub process holds the lock
 ERR_CONFLICT_PAGE_EXISTS         Title exists with unexpected ID
+ERR_CONFLICT_FILE_EXISTS         Local file already exists (pull)
 
 ERR_IO_FILE_NOT_FOUND            Source file missing
 ERR_IO_CONNECTION                Confluence unreachable
 ERR_IO_TIMEOUT                   Request timed out
 
-ERR_INTERNAL_CONVERTER           Conversion crashed
+ERR_INTERNAL_CONVERTER           Markdown → Confluence conversion crashed
+ERR_INTERNAL_REVERSE_CONVERTER   Confluence → Markdown conversion crashed
 ERR_INTERNAL_SDK                 Unexpected API response
 ```
 
@@ -230,7 +289,7 @@ When `LLM=true` or stdin is non-interactive, confpub never prompts — it return
 
 ## Markdown Conversion
 
-confpub converts Markdown to Confluence Storage Format:
+confpub converts Markdown to Confluence Storage Format (and back via `page pull`):
 
 | Markdown | Confluence Output |
 |----------|-------------------|
@@ -378,22 +437,24 @@ Then commit and push to `main` — GitHub Actions will publish to PyPI automatic
 
 ```
 confpub/
-├── cli.py              # Typer app, commands, envelope wrapping
-├── envelope.py         # Pydantic envelope model
-├── errors.py           # Error codes, exit codes, ConfpubError
-├── output.py           # TOON / LLM=true / isatty logic
-├── config.py           # Credential precedence
-├── confluence.py       # atlassian-python-api wrapper
-├── converter.py        # Markdown → Confluence Storage Format
-├── manifest.py         # Manifest + plan artifact models
-├── lockfile.py         # confpub.lock persistence
-├── assets.py           # Asset discovery, upload, URL rewriting
-├── planner.py          # plan.create
-├── validator.py        # plan.validate
-├── applier.py          # plan.apply
-├── verifier.py         # plan.verify
-├── publish.py          # page.publish shortcut
-└── guide.py            # Machine-readable CLI schema
+├── cli.py                # Typer app, commands, envelope wrapping
+├── envelope.py           # Pydantic envelope model
+├── errors.py             # Error codes, exit codes, ConfpubError
+├── output.py             # TOON / LLM=true / isatty logic
+├── config.py             # Credential precedence
+├── confluence.py         # atlassian-python-api wrapper
+├── converter.py          # Markdown → Confluence Storage Format
+├── reverse_converter.py  # Confluence Storage Format → Markdown
+├── manifest.py           # Manifest + plan artifact models
+├── lockfile.py           # confpub.lock persistence
+├── assets.py             # Asset discovery, upload, URL rewriting
+├── planner.py            # plan.create
+├── validator.py          # plan.validate
+├── applier.py            # plan.apply
+├── verifier.py           # plan.verify
+├── publish.py            # page.publish shortcut
+├── puller.py             # page.pull workflow
+└── guide.py              # Machine-readable CLI schema
 ```
 
 ### Technology Stack
@@ -403,6 +464,7 @@ confpub/
 | CLI framework | [Typer](https://typer.tiangolo.com) |
 | Confluence API | [atlassian-python-api](https://github.com/atlassian-api/atlassian-python-api) |
 | Markdown parsing | [markdown-it-py](https://github.com/executablebooks/markdown-it-py) |
+| HTML → Markdown | [markdownify](https://github.com/matthewwithanm/python-markdownify) + [BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/) |
 | Validation | [Pydantic v2](https://docs.pydantic.dev) |
 | JSON serialization | [orjson](https://github.com/ijl/orjson) |
 | Credentials | [keyring](https://github.com/jaraco/keyring) + env vars |
