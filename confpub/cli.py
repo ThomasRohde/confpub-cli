@@ -171,12 +171,14 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
 @page_app.command("list")
 def page_list(
     space: str = typer.Option(..., "--space", help="Confluence space key"),
+    limit: int = typer.Option(25, "--limit", help="Maximum number of pages to return"),
+    start: int = typer.Option(0, "--start", help="Starting offset for pagination"),
 ) -> None:
     """List pages in a Confluence space."""
     with command_context("page.list", target={"space": space}) as ctx:
         from confpub.confluence import build_client, _slim_page
         client = build_client()
-        pages = client.list_pages(space)
+        pages = client.list_pages(space, start=start, limit=limit)
         ctx.result = {"pages": [_slim_page(p, base_url=client._config.base_url.rstrip("/")) for p in pages]}
 
 
@@ -235,6 +237,12 @@ def page_publish(
     if page_id:
         target["page_id"] = page_id
     with command_context("page.publish", target=target) as ctx:
+        from pathlib import Path as _Path
+        if not _Path(file).exists():
+            raise ConfpubError(
+                "ERR_IO_FILE_NOT_FOUND",
+                f"File not found: {file}",
+            )
         if not page_id and not parent:
             raise ConfpubError(
                 "ERR_VALIDATION_REQUIRED",
@@ -307,12 +315,54 @@ def page_delete(
             )
         from confpub.confluence import build_client
         client = build_client()
+
+        # Collect page IDs that will be deleted (for lockfile cleanup)
+        deleted_ids: set[str] = set()
         if page_id:
             if cascade:
+                # Collect descendant IDs before deleting
+                def _collect_ids(pid: str) -> None:
+                    children = client.get_page_children(pid)
+                    for child in children:
+                        cid = str(child["id"])
+                        deleted_ids.add(cid)
+                        _collect_ids(cid)
+                _collect_ids(page_id)
                 client._delete_descendants(page_id)
+            deleted_ids.add(page_id)
             result = client.delete_page(page_id)
         else:
+            if cascade:
+                page = client.get_page(space, title)
+                if page:
+                    pid = str(page["id"])
+                    def _collect_ids_by_title(p: str) -> None:
+                        children = client.get_page_children(p)
+                        for child in children:
+                            cid = str(child["id"])
+                            deleted_ids.add(cid)
+                            _collect_ids_by_title(cid)
+                    _collect_ids_by_title(pid)
+                    deleted_ids.add(pid)
             result = client.delete_page_by_title(space, title, cascade=cascade)
+
+        # Clean up lockfile entries for deleted pages
+        from pathlib import Path
+        from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, remove_from_lockfile
+        lockfile_path = Path.cwd() / "confpub.lock"
+        lockfile = load_lockfile(lockfile_path)
+        if lockfile:
+            removed = False
+            if title and not page_id:
+                removed = remove_from_lockfile(lockfile, title) or removed
+            # Remove entries matching any deleted page ID
+            for lf_title, entry in list(lockfile.pages.items()):
+                if entry.page_id in deleted_ids:
+                    remove_from_lockfile(lockfile, lf_title)
+                    removed = True
+            if removed:
+                save_lockfile(lockfile_path, lockfile)
+
         ctx.result = result
 
 
@@ -494,6 +544,10 @@ def search(
             excerpt_length=excerpt_length,
         )
         result["cql_query"] = effective_cql
+        if space and result.get("total", 0) == 0:
+            ctx.warnings.append(
+                f"No results found. Verify space '{space}' exists (use 'space list' to check)."
+            )
         ctx.result = result
 
 

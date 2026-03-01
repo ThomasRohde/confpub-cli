@@ -14,7 +14,7 @@ from typing import Any
 from confpub.assets import AssetRef, discover_assets, rewrite_image_urls, upload_assets
 from confpub.config import load_config
 from confpub.confluence import ConfluenceClient
-from confpub.converter import convert_markdown
+from confpub.converter import convert_markdown, fingerprint_content
 from confpub.errors import ERR_CONFLICT_FINGERPRINT, ERR_IO_FILE_NOT_FOUND, ConfpubError
 from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, update_lockfile
 from confpub.manifest import PlanArtifact
@@ -126,6 +126,7 @@ def apply_plan(
 
                 # Update lockfile and parent tracking
                 update_lockfile(lockfile, page.title, new_id, new_version if isinstance(new_version, int) else 1)
+                lockfile.pages[page.title].content_fingerprint = fingerprint_content(storage)
                 parent_ids[page.title] = new_id
 
             counts["create"] += 1
@@ -180,6 +181,7 @@ def apply_plan(
                     lockfile, page.title, page.confluence_page_id,
                     new_version if isinstance(new_version, int) else 1,
                 )
+                lockfile.pages[page.title].content_fingerprint = fingerprint_content(storage)
                 parent_ids[page.title] = page.confluence_page_id
 
             counts["update"] += 1
@@ -193,4 +195,5 @@ def apply_plan(
         "dry_run": dry_run,
         "changes": changes,
         "summary": counts,
+        "lockfile_updated": not dry_run and len(changes) > 0,
     }

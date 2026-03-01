@@ -90,3 +90,14 @@ def update_lockfile(
     """Update a page entry in the lockfile."""
     lockfile.pages[title] = LockPageEntry(page_id=page_id, version=version)
     return lockfile
+
+
+def remove_from_lockfile(lockfile: Lockfile, title: str) -> bool:
+    """Remove a page entry from the lockfile by title.
+
+    Returns True if the entry was found and removed, False otherwise.
+    """
+    if title in lockfile.pages:
+        del lockfile.pages[title]
+        return True
+    return False

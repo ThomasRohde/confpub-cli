@@ -8,6 +8,7 @@ from confpub.lockfile import (
     LockPageEntry,
     Lockfile,
     load_lockfile,
+    remove_from_lockfile,
     save_lockfile,
     update_lockfile,
 )
@@ -110,3 +111,35 @@ class TestUpdateLockfile:
         update_lockfile(lf, "A", "1", 2)
         assert lf.pages["B"].page_id == "2"
         assert lf.pages["B"].version == 1
+
+
+class TestRemoveFromLockfile:
+    def test_remove_existing_entry(self):
+        lf = Lockfile(pages={
+            "A": LockPageEntry(page_id="1", version=1),
+            "B": LockPageEntry(page_id="2", version=2),
+        })
+        result = remove_from_lockfile(lf, "A")
+        assert result is True
+        assert "A" not in lf.pages
+        assert "B" in lf.pages
+
+    def test_remove_nonexistent_entry(self):
+        lf = Lockfile(pages={
+            "A": LockPageEntry(page_id="1", version=1),
+        })
+        result = remove_from_lockfile(lf, "Missing")
+        assert result is False
+        assert "A" in lf.pages
+
+    def test_remove_from_empty_lockfile(self):
+        lf = Lockfile()
+        result = remove_from_lockfile(lf, "Anything")
+        assert result is False
+
+    def test_remove_all_entries(self):
+        lf = Lockfile(pages={
+            "A": LockPageEntry(page_id="1", version=1),
+        })
+        remove_from_lockfile(lf, "A")
+        assert len(lf.pages) == 0

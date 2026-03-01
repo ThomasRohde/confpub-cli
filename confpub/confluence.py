@@ -262,11 +262,13 @@ class ConfluenceClient:
             self._handle_error(exc, "list_spaces")
             return []
 
-    def list_pages(self, space: str) -> list[dict[str, Any]]:
+    def list_pages(self, space: str, *, start: int = 0, limit: int = 25) -> list[dict[str, Any]]:
         """List pages in a space."""
         self._call_count += 1
         try:
-            result = self._api.get_all_pages_from_space(space, expand="version")
+            result = self._api.get_all_pages_from_space(
+                space, start=start, limit=limit, expand="version",
+            )
             return result if isinstance(result, list) else []
         except Exception as exc:
             self._handle_error(exc, "list_pages")

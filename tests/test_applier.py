@@ -127,6 +127,42 @@ class TestApplyPlanReal:
         assert "Existing Page" in lock_data["pages"]
 
 
+class TestApplyLockfileFingerprints:
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_lockfile_entries_have_fingerprints(self, MockClient, mock_config, plan_dir, mock_client):
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_dir / "plan.json"), dry_run=False)
+
+        lockfile_path = plan_dir / "confpub.lock"
+        assert lockfile_path.exists()
+        lock_data = json.loads(lockfile_path.read_text())
+        for title in ("New Page", "Existing Page"):
+            entry = lock_data["pages"][title]
+            assert entry["content_fingerprint"] is not None, f"{title} has null fingerprint"
+            assert len(entry["content_fingerprint"]) == 64  # SHA-256 hex digest
+
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_lockfile_updated_in_result(self, MockClient, mock_config, plan_dir, mock_client):
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_dir / "plan.json"), dry_run=False)
+        assert result["lockfile_updated"] is True
+
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_lockfile_updated_false_on_dry_run(self, MockClient, mock_config, plan_dir, mock_client):
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_dir / "plan.json"), dry_run=True)
+        assert result["lockfile_updated"] is False
+
+
 class TestFingerprintCheck:
     @patch("confpub.applier.load_config")
     @patch("confpub.applier.ConfluenceClient")

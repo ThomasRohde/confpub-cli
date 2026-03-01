@@ -130,8 +130,8 @@ def _check_conflicts(file_paths: dict[str, str], force: bool) -> None:
             ERR_CONFLICT_FILE_EXISTS,
             f"Output files already exist: {', '.join(existing[:5])}"
             + (f" (and {len(existing) - 5} more)" if len(existing) > 5 else ""),
-            details={"existing_files": existing},
-            suggested_action="fix_input",
+            details={"existing_files": existing, "hint": "Use --force to overwrite existing files"},
+            suggested_action="retry_with_flag",
         )
 
 

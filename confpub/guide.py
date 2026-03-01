@@ -86,7 +86,7 @@ def build_guide() -> dict[str, Any]:
                 "group": "read",
                 "mutates": False,
                 "description": "List pages in a Confluence space",
-                "flags": ["--space"],
+                "flags": ["--space", "--limit", "--start"],
             },
             "page.inspect": {
                 "group": "read",
@@ -244,6 +244,7 @@ def build_guide() -> dict[str, Any]:
             },
             "behavior": [
                 "Created/updated automatically by page.publish, page.pull, and plan.apply",
+                "Entries removed automatically by page.delete (including --cascade)",
                 "Written atomically (temp file + rename) for crash safety",
                 "Used by plan.create to detect existing pages and versions",
                 "Does not prevent concurrent operations — purely local state tracking",

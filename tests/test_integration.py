@@ -110,7 +110,7 @@ class TestPersonalSpaceKeyCLI:
         """--space ~thro must arrive as literal '~thro' in the command handler."""
         captured = {}
 
-        def fake_list_pages(self, space):
+        def fake_list_pages(self, space, **kwargs):
             captured["space"] = space
             return []
 
