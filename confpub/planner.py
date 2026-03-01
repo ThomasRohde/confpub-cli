@@ -70,6 +70,8 @@ def create_plan(
                 ERR_IO_FILE_NOT_FOUND,
                 f"Source file not found: {fp.file}",
                 details={"file": fp.file},
+                retryable=False,
+                suggested_action="fix_input",
             )
 
         # Read and convert markdown

@@ -19,9 +19,14 @@ from confpub.manifest import PlanArtifact, PlanPage
 
 def _load_plan(plan_path: str) -> PlanArtifact:
     """Load and parse a plan artifact JSON file."""
-    p = Path(plan_path)
+    p = Path(plan_path).resolve()
     if not p.exists():
-        raise ConfpubError(ERR_IO_FILE_NOT_FOUND, f"Plan file not found: {plan_path}")
+        raise ConfpubError(
+            ERR_IO_FILE_NOT_FOUND,
+            f"Plan file not found: {plan_path}",
+            retryable=False,
+            suggested_action="fix_input",
+        )
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         return PlanArtifact(**data)

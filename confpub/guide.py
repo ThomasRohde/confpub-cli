@@ -66,6 +66,7 @@ def build_guide() -> dict[str, Any]:
                 "mutates": False,
                 "description": "Search Confluence content using CQL",
                 "flags": ["--cql", "--space", "--type", "--limit", "--start", "--include-archived", "--excerpt-length"],
+                "agent_hint": "Most agent workflows should include --type page to exclude attachments and space entities from results.",
                 "result_schema": {
                     "cql_query": "string — effective CQL sent to the API",
                     "results": "list of {id, type, title, excerpt, url, space_key, entity_type, status, last_modified, container_title}",
@@ -90,7 +91,7 @@ def build_guide() -> dict[str, Any]:
                 "group": "read",
                 "mutates": False,
                 "description": "Inspect a Confluence page",
-                "flags": ["--space", "--title", "--page-id"],
+                "flags": ["--space", "--title", "--page-id", "--format"],
             },
             "page.publish": {
                 "group": "write",
@@ -231,6 +232,21 @@ def build_guide() -> dict[str, Any]:
                 "plan.apply acquires a local lockfile; concurrent applies "
                 "to the same workspace return ERR_CONFLICT_LOCK"
             ),
+        },
+        "lockfile": {
+            "description": "Local state file tracking page IDs and versions from publish/pull operations.",
+            "file": "confpub.lock",
+            "schema": {
+                "schema_version": "Lockfile format version (currently '1.0')",
+                "last_updated": "ISO 8601 timestamp of last write",
+                "pages": "Map of page title to { page_id, version }",
+            },
+            "behavior": [
+                "Created/updated automatically by page.publish, page.pull, and plan.apply",
+                "Written atomically (temp file + rename) for crash safety",
+                "Used by plan.create to detect existing pages and versions",
+                "Does not prevent concurrent operations — purely local state tracking",
+            ],
         },
         "auth": {
             "precedence": [

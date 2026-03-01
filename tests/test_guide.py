@@ -6,7 +6,7 @@ from confpub.guide import build_guide
 class TestBuildGuide:
     def test_has_required_top_level_keys(self):
         guide = build_guide()
-        for key in ("schema_version", "commands", "error_codes", "auth", "concurrency"):
+        for key in ("schema_version", "commands", "error_codes", "auth", "concurrency", "lockfile"):
             assert key in guide, f"Missing top-level key: {key}"
 
     def test_all_commands_present(self):

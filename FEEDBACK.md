@@ -1,226 +1,197 @@
-# confpub-cli v0.2.3 — Blind Test Feedback
+# confpub-cli v0.5.0 — Blind Test Feedback
 
-**Tester**: Claude Opus 4.6 (LLM agent)
-**Date**: 2026-03-01
-**Environment**: Windows 11, bash shell, `uvx confpub-cli`
-**Confluence**: Cloud instance (thomasklokrohde.atlassian.net)
+Tested by: Claude Code (Opus 4.6) on 2026-03-01, Windows 11, via `uvx confpub-cli`.
 
 ---
 
-## Overall Impression
+## Summary
 
-confpub-cli is a remarkably well-designed agent-first CLI. As an LLM agent driving it
-zero-shot, I was productive within seconds. The `guide` command gave me everything I
-needed to understand the full command surface, error taxonomy, and concurrency rules.
-The consistent JSON envelope made it trivial to parse every response. This is one of
-the best-designed CLIs I've encountered for agent consumption.
-
-**Rating: 4/5** — Excellent foundation with a handful of rough edges to polish.
+confpub v0.5.0 is a well-designed, agent-friendly CLI. The structured JSON envelope, clear error taxonomy, and comprehensive `guide` command make it straightforward for an LLM agent to drive programmatically. The full publish/pull/delete lifecycle works correctly, and round-trip Markdown fidelity is excellent. This review covers what works well, what could be improved, and specific bugs encountered.
 
 ---
 
 ## What Works Well
 
 ### Structured JSON Envelope
-Every command returns the same `{ ok, command, target, result, warnings, errors, metrics }`
-shape. Parsing is zero-effort. The `request_id` and `metrics.duration_ms` fields are a
-nice touch for tracing and diagnostics.
-
-### `guide` Command
-Brilliant bootstrapping mechanism. One call gives an agent: every command with its flags,
-mutability annotations, error codes with exit codes and retry hints, auth precedence,
-and concurrency rules. The `--section` flag is useful for targeted queries. This alone
-puts confpub ahead of most CLI tools for agent integration.
-
-### Transactional Plan Workflow
-The plan → validate → apply → verify pipeline is well thought out:
-- `plan create` generates a readable artifact with clear operation types
-- `plan validate` checks for drift before apply
-- `plan apply` supports `--dry-run` for preview
-- The lockfile (`confpub.lock`) enables idempotent re-publishing
-
-I tested the full cycle and it worked flawlessly: manifest → plan → validate → dry-run → apply → verify.
-
-### Markdown Conversion
-Tested headings, bold/italic, inline code, fenced code blocks (with language), tables,
-admonitions (`[!NOTE]`, `[!WARNING]`, `[!TIP]`), strikethrough, and horizontal rules.
-All converted correctly to Confluence Storage Format. Particularly impressed that
-admonitions map to the proper Confluence Info/Warning/Tip macros.
+Every command returns the same `{ ok, command, target, result, warnings, errors, metrics }` shape. This is the single most important design decision for agent consumption — no output parsing required.
 
 ### Error Taxonomy
-Stable error codes (`ERR_*`) with structured details, exit codes, and `suggested_action`
-hints (`fix_input`, `retry`, `reauth`, `escalate`). An agent can branch on these without
-parsing human-readable messages. The `retryable` flag and `retry_after_ms` for I/O errors
-are agent-friendly.
+Typed error codes (`ERR_VALIDATION_*`, `ERR_AUTH_*`, `ERR_IO_*`, `ERR_CONFLICT_*`) with `retryable` and `suggested_action` fields make programmatic error handling trivial. Exit codes are consistent with the documented schema.
 
-### Safety Design
-- Write commands are clearly annotated as `mutates: true` in the guide
-- `--dry-run` is available on both `page publish` and `plan apply`
-- `--cascade` is a separate opt-in for cascading deletes
-- `safety_flags` section in the guide calls out dangerous flags
+### `guide` Command
+The machine-readable schema is comprehensive: command metadata, flags, safety annotations, concurrency rules, error codes, and auth precedence. The `--section` flag works for top-level keys (`commands`, `auth`, `error_codes`, `concurrency`).
 
-### Auth Resolution
-Clean precedence chain (flags → env vars → config file → keychain) with auto-detection
-of Cloud vs Server from the URL. `auth inspect` gives a quick status check.
+### Markdown Round-Trip Fidelity
+Published a file with headings, bullet lists, tables, blockquotes, and fenced code blocks. Pulled it back — the Markdown was virtually identical (only trivial whitespace differences in table alignment `| --- |` vs `|---------|`). This is a strong result.
 
----
+### Publish Lifecycle
+- `page.publish` with `--dry-run` correctly reports what would happen before writing.
+- Re-publishing an existing page updates it in-place with version increment.
+- `--backup` flag saves the previous HTML to `.confpub-backup-{id}.html`.
+- `--title` override works as expected.
+- `page.delete` cleanly removes the page.
 
-## Bugs Found
+### Recursive Pull + Manifest Generation
+`page pull --recursive --manifest` correctly traverses child pages and generates a well-structured `confpub.yaml` manifest. The flat layout manifest correctly represents the page hierarchy with `children:` nesting.
 
-### BUG-1: `--space` flag ignored during page update (Severity: High)
+### Plan Workflow
+The `plan create` / `plan validate` / `plan apply --dry-run` workflow functions correctly. Plans include fingerprints for stale-state detection, which is a nice safety feature.
 
-When I published a page to space `SD`, then re-published with `--space NONEXIST`, the
-command succeeded (exit 0) and updated the existing page in the `SD` space. The `--space`
-flag was silently ignored on the update path.
+### Lock File
+`confpub.lock` tracks page IDs and versions, providing local state awareness across commands.
 
-**Repro:**
-```bash
-confpub page publish test.md --space SD --parent "Software Development"
-# Creates page in SD, version 1
-
-confpub page publish test.md --space NONEXIST --parent "Software Development"
-# Expected: error (space not found or page not found in that space)
-# Actual: ok=true, updated page in SD to version 3
-```
-
-**Impact**: An agent could accidentally update a page in the wrong space without any
-warning. The title-based lookup appears to match globally (or against the lockfile)
-rather than scoping to the specified space.
-
-### BUG-2: Nonexistent page returns `ok: true` with `result: null` (Severity: Medium)
-
-```bash
-confpub page inspect --space SD --title "nonexistent-page"
-# Returns: ok=true, result=null, errors=[]
-```
-
-This should return `ok: false` with an appropriate error (e.g., a new `ERR_NOT_FOUND`
-code). An agent checking `ok` to determine success would incorrectly think the call
-succeeded. Currently the only way to detect "not found" is to check if `result` is null,
-which is an undocumented convention.
-
-A `"Can't find ... page"` message also leaks to stderr, suggesting the underlying library
-knows it's not found — the CLI just doesn't surface it as a structured error.
-
-### BUG-3: Missing required options return exit code 2, not JSON envelope (Severity: Medium)
-
-```bash
-confpub page list
-# Returns Typer's error format: "Missing option '--space'." with exit code 2
-```
-
-This breaks the documented invariant: "stdout is exclusively JSON — one object, no
-preamble, no epilogue." An agent expecting to always parse JSON on stdout will crash.
-Exit code 2 is also undocumented (the error code table only covers 0/10/20/40/50/90).
-
-**Suggestion**: Catch Typer's `MissingParameter` and convert it to an
-`ERR_VALIDATION_REQUIRED` envelope with exit code 10.
-
-### BUG-4: `--backup` flag produces no observable output (Severity: Low)
-
-```bash
-confpub page publish test.md --space SD --parent "Software Development" --backup
-```
-
-The command succeeded but the result JSON contains no mention of a backup being created —
-no backup file path, no `backup: true` field, nothing. Either the backup didn't happen,
-or it happened silently. An agent has no way to confirm.
-
-### BUG-5: Nonexistent parent accepted in dry-run (Severity: Low)
-
-```bash
-confpub page publish test.md --space SD --parent "Nonexistent Parent" --dry-run
-# Returns: ok=true, type=page.update
-```
-
-Dry-run should ideally validate that the parent page exists, or at least emit a warning.
-Currently it plans an update to a nonexistent parent, which would fail on real apply.
+### Auth & Config
+`auth inspect` and `config inspect` return clear, useful information. Token masking in `config inspect` is a good security practice.
 
 ---
 
-## Improvement Suggestions
+## Bugs
 
-### 1. Normalize attachment command output
+### 1. Stderr Message Leaks on Expected "Not Found" Lookups
+**Severity: Medium**
 
-`attachment.list` and `attachment.upload` return raw Confluence API responses with
-internal fields (`_expandable`, ARIs, `base64EncodedAri`, full user profiles). Every
-other command returns a curated result. These should be normalized to the same level
-of curation.
+When publishing a new page (or doing a dry-run), the CLI prints `Can't find '<title>' page on ...` to stderr before the JSON output. This happens because the tool checks whether the page exists first. For a *new* page, not finding it is the expected path — not an error. The message is confusing, especially during `--dry-run` where the user explicitly wants to preview a creation.
 
-**Suggested `attachment.list` shape:**
-```json
-{
-  "attachments": [
-    {
-      "id": "att262400",
-      "title": "test-attachment.txt",
-      "media_type": "application/binary",
-      "file_size": 27,
-      "download_url": "/download/attachments/360459/test-attachment.txt?..."
-    }
-  ]
-}
+`--quiet` suppresses it, but agents shouldn't need `--quiet` for expected behavior.
+
+**Suggestion:** Only emit this message at `--verbose` level, or suppress it when the subsequent operation succeeds.
+
+### 2. Relative Paths Fail for `plan validate` and `plan apply`
+**Severity: Medium**
+
+```
+uvx confpub-cli plan validate --plan plan-test/test-plan.json
+# ERR_IO_FILE_NOT_FOUND: Plan file not found: plan-test/test-plan.json
+
+uvx confpub-cli plan validate --plan "C:/Users/.../test-plan.json"
+# Works fine
 ```
 
-### 2. Add `--format` flag or page count to `page.list`
+Relative paths resolve correctly for `page publish` (the FILE argument) but not for `--plan` in plan commands. This is likely a `Path.resolve()` vs `Path()` issue.
 
-For spaces with many pages, `page.list` returns everything. Consider:
-- A `--limit` / `--offset` for pagination
-- A `--format compact` option (just titles + IDs)
-- Include total count in the result
+### 3. `page inspect` `webui` Field Inconsistent Format
+**Severity: Low**
 
-### 3. Suppress `"Can't find ... page"` stderr noise
+- With `--space SD --title "..."`: returns relative URL `/spaces/SD/pages/327981/Test+Page`
+- With `--page-id 327981`: returns absolute URL `https://...atlassian.net/wiki/spaces/SD/pages/327981/Test+Page`
 
-Multiple commands emit `"Can't find 'X' page on ..."` to stderr. This comes from the
-underlying `atlassian-python-api` library but leaks through even with `--quiet`. Since
-not finding a page is a normal flow (e.g., first publish), this shouldn't appear by
-default — maybe only with `--verbose`.
+Should be consistent — preferably always absolute, since the agent may not know the base URL.
 
-### 4. Add stdin support
+### 4. `ERR_AUTH_FORBIDDEN` for Nonexistent Space
+**Severity: Low**
 
-`echo "# Hello" | confpub page publish - --space SD --parent "Docs" --title "Hello"`
-would be useful for piped workflows and agent-generated content. Currently `-` is treated
-as a literal filename.
-
-### 5. `plan verify` with no assertions is a no-op
-
-```bash
-confpub plan verify --plan confpub-plan.json
-# Returns: all_passed=true, results=[]
+```
+uvx confpub-cli page inspect --space FAKESPACE --title "Test"
+# ERR_AUTH_FORBIDDEN: "Permission denied (get_page)"
+# suggested_action: "escalate"
 ```
 
-Without `--assertions`, this always passes vacuously. Consider:
-- Auto-generating basic assertions from the plan (pages exist, correct parent, version incremented)
-- Emitting a warning when no assertions are provided
+A nonexistent space key returns a permission error rather than a "space not found" validation error. The `suggested_action` is `"escalate"` but the guide says ERR_AUTH_FORBIDDEN should suggest `"reauth"`. An agent following the guide would incorrectly attempt to re-authenticate.
 
-### 6. Consider `--json` flag for Typer-level errors
+### 5. `guide --section` Does Not List Valid Sections on Error
+**Severity: Low**
 
-As a bridge until BUG-3 is fully fixed, a `--json` flag could force JSON output even
-for framework-level errors (missing options, unknown commands).
+```
+uvx confpub-cli guide --section search
+# ERR_VALIDATION_REQUIRED: "Unknown guide section: search"
+```
 
-### 7. Lockfile includes pages from `page publish` and `plan apply`
+The error doesn't tell you what the valid sections are. Adding `"valid_sections": ["commands", "auth", "error_codes", "concurrency", "compatibility"]` to the error details would save a round-trip.
 
-The lockfile accumulated entries from both `page publish` (single-file mode) and
-`plan apply`. This might be intentional for idempotency, but it could surprise users
-who expected the lockfile to only track manifest-managed pages. Consider documenting
-this behavior or separating the two.
+### 6. Nested Layout Manifest Uses Ambiguous `file: index.md` for All Pages
+**Severity: Medium**
+
+When using `--layout nested`, every page gets `file: index.md` in the manifest without a directory prefix:
+
+```yaml
+pages:
+- title: confpub v0.3.0 Blind Test Report
+  file: index.md
+  children:
+  - title: What Works Well
+    file: index.md
+  - title: Bugs and Issues
+    file: index.md
+```
+
+These are all `index.md` — a plan created from this manifest would have no way to distinguish them. The file paths should include the relative directory (e.g., `confpub-v030-blind-test-report/index.md`).
+
+### 7. Nested Layout Doesn't Actually Nest Directories
+**Severity: Low**
+
+The `--layout nested` option creates a flat set of directories rather than truly nesting children inside parents:
+
+```
+pulled-nested/
+  confpub-v030-blind-test-report/index.md   # parent
+  what-works-well/index.md                   # child (not nested inside parent dir)
+  bugs-and-issues/index.md                   # child
+  full-test-matrix/index.md                  # child
+```
+
+Expected behavior for "nested" layout would place children inside the parent directory.
+
+### 8. `--layout nested` Generates Manifest Without `--manifest` Flag
+**Severity: Low**
+
+Using `page pull --layout nested` generates a `confpub.yaml` even without the `--manifest` flag. The flat layout correctly requires `--manifest` to generate one.
 
 ---
 
-## Summary
+## Suggestions (Not Bugs)
 
-| Area | Score |
-|------|-------|
-| Agent discoverability (`guide`) | 5/5 |
-| JSON envelope consistency | 4/5 (BUG-3 breaks it for Typer errors) |
-| Error handling | 4/5 (BUG-2 masks not-found) |
-| Markdown conversion | 5/5 |
-| Plan workflow | 5/5 |
-| Write correctness | 3/5 (BUG-1 is a real data integrity risk) |
-| Output curation | 3/5 (attachments leak raw API) |
-| Documentation (README) | 5/5 |
+### Add `page.inspect --format markdown`
+Currently `page inspect` returns raw Confluence storage XML. An option to return the reverse-converted Markdown would be useful for quick content review without pulling to a file.
 
-confpub is production-ready for the core read + plan + publish workflows. The main
-blocker is BUG-1 (space flag ignored on updates), which could cause silent cross-space
-writes. Fixing that plus normalizing the attachment output would bring this to a
-strong 5/5.
+### Add `search --type page` Default for Agent Usage
+Agents almost always want pages, not attachments or space entities. Consider a default or a `--pages-only` shorthand.
+
+### Document `confpub.lock` in `guide`
+The lock file is created implicitly but isn't documented in the guide schema. Agents should know it exists and what it tracks.
+
+### `ERR_IO_FILE_NOT_FOUND` Suggestion for Missing Source
+When the source file doesn't exist, `retryable: true` with `suggested_action: "retry"` is misleading — a file that doesn't exist won't appear on retry. Consider `retryable: false` with `suggested_action: "fix_input"` for local file-not-found errors (vs. transient network errors).
+
+---
+
+## Test Matrix
+
+| Command | Flags Tested | Result | Notes |
+|---|---|---|---|
+| `guide` | (none), `--section commands`, `--section auth`, `--section error_codes` | Pass | `--section` works for top-level keys |
+| `guide --section` | invalid section name | Pass (with note) | Error lacks valid section list |
+| `auth inspect` | (none) | Pass | |
+| `config inspect` | (none) | Pass | Token correctly masked |
+| `space list` | (none) | Pass | |
+| `page list` | `--space` | Pass | |
+| `page inspect` | `--space --title`, `--page-id` | Pass | webui format inconsistency |
+| `page publish` | `--dry-run`, `--backup`, `--title` | Pass | stderr leak on new page |
+| `page publish` (update) | `--backup` | Pass | Version incremented correctly |
+| `page pull` | `--output`, `--force`, `--manifest` | Pass | |
+| `page pull` | `--recursive`, `--layout flat` | Pass | |
+| `page pull` | `--recursive`, `--layout nested` | Pass (with notes) | Manifest ambiguity, not truly nested |
+| `page delete` | `--space --title` | Pass | |
+| `search` | `--space`, `--limit`, `--cql` | Pass | |
+| `plan create` | `--manifest`, `--output` | Pass | |
+| `plan validate` | `--plan` (absolute path) | Pass | Relative path fails |
+| `plan apply` | `--plan --dry-run` | Pass | |
+| `attachment list` | `--page-id` | Pass | |
+| `--quiet` | global flag | Pass | Suppresses stderr messages |
+| `--verbose` | global flag | Pass | Adds diagnostics to metrics |
+| Error: missing file | `page publish nonexistent.md` | Pass | Clear error |
+| Error: missing page | `page inspect --title "..."` | Pass | |
+| Error: missing args | `page publish` (no file) | Pass | |
+| Error: missing space | `--space FAKESPACE` | Fail | Misleading ERR_AUTH_FORBIDDEN |
+
+---
+
+## Overall Assessment
+
+**confpub v0.5.0 is production-ready for the core publish/pull/delete workflow.** The agent-first JSON design, error taxonomy, and guide command set a high bar for CLI ergonomics. The main areas for improvement are:
+
+1. Fix relative path resolution for plan commands (blocks scripted workflows)
+2. Fix the nested layout manifest ambiguity (blocks round-trip with nested trees)
+3. Suppress the "Can't find" stderr noise on expected new-page creation
+4. Normalize the `webui` field format
+
+None of these are blockers for single-page publishing, which is the most common use case.

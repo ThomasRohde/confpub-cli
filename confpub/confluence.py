@@ -32,10 +32,10 @@ class ConfluenceClient:
         self._call_count = 0
 
         # Suppress noisy atlassian-python-api logging (e.g. "Can't find 'X' page")
-        from confpub.output import is_quiet
+        from confpub.output import is_verbose
 
         atlassian_logger = logging.getLogger("atlassian")
-        atlassian_logger.setLevel(logging.CRITICAL if is_quiet() else logging.WARNING)
+        atlassian_logger.setLevel(logging.WARNING if is_verbose() else logging.CRITICAL)
 
     @staticmethod
     def _build_api(config: ResolvedConfig) -> Any:
@@ -74,7 +74,7 @@ class ConfluenceClient:
             raise ConfpubError(
                 ERR_AUTH_FORBIDDEN,
                 f"Permission denied ({context}): {msg}",
-                suggested_action="escalate",
+                details={"note": "This may indicate a nonexistent resource; Confluence returns 403 for both."},
             ) from exc
         # Not found (404 or explicit "not found")
         if "404" in msg or "not found" in msg.lower():
@@ -403,7 +403,7 @@ class ConfluenceClient:
             return None
 
 
-def _slim_page(page: dict[str, Any]) -> dict[str, Any]:
+def _slim_page(page: dict[str, Any], *, base_url: str = "") -> dict[str, Any]:
     """Extract agent-relevant fields from a raw Confluence page object."""
     result: dict[str, Any] = {
         "id": page.get("id"),
@@ -421,7 +421,7 @@ def _slim_page(page: dict[str, Any]) -> dict[str, Any]:
         result["body_storage"] = body
     links = page.get("_links", {})
     if "webui" in links:
-        base = links.get("base", "")
+        base = links.get("base", "") or base_url
         result["webui"] = base + links["webui"]
     return result
 

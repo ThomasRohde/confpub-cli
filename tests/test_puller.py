@@ -176,6 +176,7 @@ class TestRecursivePull:
                 page_id="1",
                 output_dir=str(tmp_path),
                 recursive=True,
+                generate_manifest=True,
             )
 
         assert result["summary"]["manifest_generated"] is True
@@ -265,7 +266,7 @@ class TestLayoutModes:
 
         assert result["layout"] == "nested"
         assert (tmp_path / "root" / "index.md").exists()
-        assert (tmp_path / "child" / "index.md").exists()
+        assert (tmp_path / "root" / "child" / "index.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +406,7 @@ class TestDataCenterCompat:
             result = pull_pages(
                 space="PROJ", title="Root",
                 output_dir=str(tmp_path), recursive=True,
+                generate_manifest=True,
             )
 
         assert result["summary"]["pages_pulled"] == 2

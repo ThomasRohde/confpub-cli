@@ -107,8 +107,9 @@ def _compute_file_paths(
             while current and current != root_page_id:
                 chain.append(id_to_slug.get(current, current))
                 current = id_to_parent.get(current)  # type: ignore[assignment]
-            if pid == root_page_id:
-                chain.append(slug)
+            # Always include root as the outermost directory
+            if root_slug:
+                chain.append(root_slug)
             chain.reverse()
             rel_path = os.path.join(*chain, "index.md") if len(chain) > 0 else f"{slug}/index.md"
             paths[pid] = os.path.join(output_dir, rel_path)
@@ -185,6 +186,7 @@ def _build_page_tree(
     pages: list[dict[str, Any]],
     file_paths: dict[str, str],
     root_page_id: str,
+    output_dir: str = ".",
 ) -> list[dict[str, Any]]:
     """Build a hierarchical page tree for manifest generation."""
     id_to_entry: dict[str, dict[str, Any]] = {}
@@ -198,7 +200,7 @@ def _build_page_tree(
 
         id_to_entry[pid] = {
             "title": page.get("title", ""),
-            "file": os.path.basename(file_path) if file_path else "",
+            "file": os.path.relpath(file_path, output_dir) if file_path else "",
             "children": [],
         }
         children_map.setdefault(parent_id, []).append(pid)
@@ -308,9 +310,9 @@ def pull_pages(
 
     # Generate manifest if requested or recursive with multiple pages
     manifest_file: str | None = None
-    if generate_manifest or (recursive and len(all_pages) > 1):
+    if generate_manifest:
         root_title = root_page.get("title", "")
-        page_tree = _build_page_tree(all_pages, file_paths, root_id)
+        page_tree = _build_page_tree(all_pages, file_paths, root_id, output_dir)
         manifest_yaml = generate_manifest_yaml(root_space, root_title, page_tree)
         manifest_path = os.path.join(output_dir, "confpub.yaml")
         Path(manifest_path).write_text(manifest_yaml, encoding="utf-8")

@@ -20,7 +20,12 @@ def _load_assertions(assertions_path: str | None, plan_path: str | None) -> list
     if assertions_path:
         p = Path(assertions_path)
         if not p.exists():
-            raise ConfpubError(ERR_IO_FILE_NOT_FOUND, f"Assertions file not found: {assertions_path}")
+            raise ConfpubError(
+                ERR_IO_FILE_NOT_FOUND,
+                f"Assertions file not found: {assertions_path}",
+                retryable=False,
+                suggested_action="fix_input",
+            )
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(data, list):
@@ -33,7 +38,12 @@ def _load_assertions(assertions_path: str | None, plan_path: str | None) -> list
         # Try to load assertions from the plan's source manifest
         p = Path(plan_path)
         if not p.exists():
-            raise ConfpubError(ERR_IO_FILE_NOT_FOUND, f"Plan file not found: {plan_path}")
+            raise ConfpubError(
+                ERR_IO_FILE_NOT_FOUND,
+                f"Plan file not found: {plan_path}",
+                retryable=False,
+                suggested_action="fix_input",
+            )
         plan_data = json.loads(p.read_text(encoding="utf-8"))
         # Plan doesn't contain assertions directly — return empty
         return []

@@ -177,7 +177,7 @@ def page_list(
         from confpub.confluence import build_client, _slim_page
         client = build_client()
         pages = client.list_pages(space)
-        ctx.result = {"pages": [_slim_page(p) for p in pages]}
+        ctx.result = {"pages": [_slim_page(p, base_url=client._config.base_url.rstrip("/")) for p in pages]}
 
 
 @page_app.command("inspect")
@@ -186,6 +186,7 @@ def page_inspect(
     title: str = typer.Option(None, "--title", help="Page title"),
     page_id: str = typer.Option(None, "--page-id", help="Confluence page ID"),
     raw: bool = typer.Option(False, "--raw", help="Return full raw API response"),
+    format: str = typer.Option("storage", "--format", help="Output format: storage (raw HTML) or markdown"),
 ) -> None:
     """Inspect a Confluence page."""
     with command_context("page.inspect", target={"space": space, "title": title, "page_id": page_id}) as ctx:
@@ -201,7 +202,20 @@ def page_inspect(
         if not page:
             from confpub.errors import ERR_VALIDATION_NOT_FOUND
             raise ConfpubError(ERR_VALIDATION_NOT_FOUND, f"Page not found")
-        ctx.result = page if raw else _slim_page(page)
+        if raw:
+            ctx.result = page
+        else:
+            result = _slim_page(page, base_url=client._config.base_url.rstrip("/"))
+            if format == "markdown" and "body_storage" in result:
+                from confpub.reverse_converter import convert_storage_to_markdown
+                conversion = convert_storage_to_markdown(result["body_storage"])
+                result["body_markdown"] = conversion.markdown
+                del result["body_storage"]
+                if conversion.warnings:
+                    result["conversion_warnings"] = conversion.warnings
+                if conversion.unknown_macros:
+                    result["unknown_macros"] = conversion.unknown_macros
+            ctx.result = result
 
 
 @page_app.command("publish")
@@ -484,6 +498,7 @@ def guide(
                     raise validation_error(
                         ERR_VALIDATION_REQUIRED,
                         f"Unknown guide section: {section}",
+                        valid_sections=list(full_guide.keys()),
                     )
             ctx.result = result
         else:

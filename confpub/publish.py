@@ -49,6 +49,8 @@ def publish_page(
             ERR_IO_FILE_NOT_FOUND,
             f"Source file not found: {file}",
             details={"file": file},
+            retryable=False,
+            suggested_action="fix_input",
         )
 
     # Derive title from filename if not provided

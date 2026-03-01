@@ -62,6 +62,8 @@ def apply_plan(
             raise ConfpubError(
                 ERR_IO_FILE_NOT_FOUND,
                 f"Source file missing: {page.source_file}",
+                retryable=False,
+                suggested_action="fix_input",
             )
 
         # Fingerprint check (unless skipped)
