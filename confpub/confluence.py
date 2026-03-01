@@ -64,6 +64,7 @@ class ConfluenceClient:
                 ERR_AUTH_FORBIDDEN,
                 f"Permission denied: {msg}",
                 suggested_action="escalate",
+                details={"note": "Confluence returns HTTP 403 for both forbidden and nonexistent resources. Verify the resource exists."},
             ) from exc
         if "timeout" in msg.lower() or "Timeout" in msg:
             raise ConfpubError(ERR_IO_TIMEOUT, f"Request timed out: {msg}") from exc
@@ -78,9 +79,9 @@ class ConfluenceClient:
             ) from exc
         # Not found (404 or explicit "not found")
         if "404" in msg or "not found" in msg.lower():
-            from confpub.errors import ERR_IO_FILE_NOT_FOUND
+            from confpub.errors import ERR_VALIDATION_NOT_FOUND
             raise ConfpubError(
-                ERR_IO_FILE_NOT_FOUND,
+                ERR_VALIDATION_NOT_FOUND,
                 f"Resource not found ({context}): {msg}",
             ) from exc
         raise ConfpubError(ERR_INTERNAL_SDK, f"Unexpected API error ({context}): {msg}") from exc
@@ -175,10 +176,11 @@ class ConfluenceClient:
         """Delete a page by space and title."""
         page = self.get_page(space, title)
         if not page:
-            from confpub.errors import ERR_IO_FILE_NOT_FOUND
+            from confpub.errors import ERR_VALIDATION_NOT_FOUND
             raise ConfpubError(
-                ERR_IO_FILE_NOT_FOUND,
+                ERR_VALIDATION_NOT_FOUND,
                 f"Page '{title}' not found in space '{space}'",
+                retryable=False,
             )
         page_id = str(page["id"])
         if cascade:
@@ -338,6 +340,9 @@ class ConfluenceClient:
         try:
             result = self._api.attach_file(filepath, page_id=page_id)
             if isinstance(result, dict):
+                # API returns {"results": [...]} wrapper — extract the attachment
+                if "results" in result and isinstance(result["results"], list) and result["results"]:
+                    return _slim_attachment(result["results"][0])
                 return _slim_attachment(result)
             return {"uploaded": True, "file": filepath}
         except Exception as exc:
@@ -364,13 +369,13 @@ class ConfluenceClient:
         """
         self._call_count += 1
         try:
-            raw = self._api.cql(
-                cql,
-                start=start,
-                limit=limit,
-                excerpt="highlight",
-                include_archived_spaces=include_archived_spaces,
-            )
+            raw = self._api.get("rest/api/search", params={
+                "cql": cql,
+                "start": start,
+                "limit": limit,
+                "excerpt": "highlight",
+                "includeArchivedSpaces": include_archived_spaces,
+            })
         except Exception as exc:
             msg = str(exc)
             if "400" in msg or "cannot be parsed" in msg.lower():
@@ -386,6 +391,9 @@ class ConfluenceClient:
         results_raw = raw.get("results", []) if isinstance(raw, dict) else []
         total = raw.get("totalSize", 0) if isinstance(raw, dict) else 0
 
+        api_start = raw.get("start", start) if isinstance(raw, dict) else start
+        api_limit = raw.get("limit", limit) if isinstance(raw, dict) else limit
+
         results = [
             _slim_search_result(r, base_url=base_url, excerpt_length=excerpt_length)
             for r in results_raw
@@ -393,9 +401,9 @@ class ConfluenceClient:
         return {
             "results": results,
             "total": total,
-            "start": start,
-            "limit": limit,
-            "has_more": (start + limit) < total,
+            "start": api_start,
+            "limit": api_limit,
+            "has_more": (api_start + api_limit) < total,
         }
 
     # ------------------------------------------------------------------

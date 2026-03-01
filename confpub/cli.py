@@ -231,15 +231,15 @@ def page_publish(
     """Publish a single Markdown file to Confluence."""
     from confpub.publish import derive_title
     resolved_title = derive_title(file, title)
-    if not page_id and not parent:
-        raise ConfpubError(
-            "ERR_VALIDATION_REQUIRED",
-            "Either --page-id or --parent is required",
-        )
     target = {"space": space, "title": resolved_title, "file": file}
     if page_id:
         target["page_id"] = page_id
     with command_context("page.publish", target=target) as ctx:
+        if not page_id and not parent:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "Either --page-id or --parent is required",
+            )
         from confpub.publish import publish_page
         result = publish_page(
             file=file,
@@ -546,3 +546,7 @@ def run() -> None:
         envelope = Envelope.failure("cli", [err])
         emit_stdout(envelope.to_json_bytes())
         sys.exit(10)
+    except ConfpubError as e:
+        envelope = Envelope.failure("cli", [e])
+        emit_stdout(envelope.to_json_bytes())
+        sys.exit(exit_code_for(e.code))

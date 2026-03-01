@@ -21,6 +21,7 @@ class LockPageEntry(BaseModel):
 
     page_id: str
     version: int = 1
+    content_fingerprint: str | None = None
 
 
 class Lockfile(BaseModel):

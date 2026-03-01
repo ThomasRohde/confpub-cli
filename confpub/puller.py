@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from confpub.confluence import ConfluenceClient, build_client
-from confpub.output import emit_stderr
+from confpub.output import emit_progress
 from confpub.errors import (
     ERR_CONFLICT_FILE_EXISTS,
     ERR_VALIDATION_NOT_FOUND,
@@ -47,7 +47,7 @@ def _collect_tree(
     def _walk(pid: str, parent_id: str | None) -> None:
         children = client.get_page_children_deep(pid)
         if children:
-            emit_stderr(f"Found {len(children)} child page(s) under {pid}")
+            emit_progress(0, 0, f"Found {len(children)} child page(s) under {pid}")
         for child in children:
             child_id = str(child["id"])
             pages.append({

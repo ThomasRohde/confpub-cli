@@ -109,9 +109,16 @@ def publish_page(
 
     # Detect noop — skip update when content is unchanged
     if operation == "update":
-        remote_fingerprint = client.fingerprint_page(existing_page_id)
-        if remote_fingerprint and remote_fingerprint == local_fingerprint:
-            operation = "noop"
+        # Check lockfile fingerprint first (avoids Confluence normalization mismatch)
+        if page_title in lockfile.pages:
+            entry = lockfile.pages[page_title]
+            if entry.content_fingerprint and entry.content_fingerprint == local_fingerprint:
+                operation = "noop"
+        # Fallback: compare against remote fingerprint
+        if operation == "update":
+            remote_fingerprint = client.fingerprint_page(existing_page_id)
+            if remote_fingerprint and remote_fingerprint == local_fingerprint:
+                operation = "noop"
 
     if dry_run:
         change: dict[str, Any] = {
@@ -186,7 +193,9 @@ def publish_page(
         uploaded_attachments = [a.source_path for a in assets]
 
     # Update lockfile
-    update_lockfile(lockfile, page_title, page_id, new_version if isinstance(new_version, int) else 1)
+    new_version_int = new_version if isinstance(new_version, int) else 1
+    update_lockfile(lockfile, page_title, page_id, new_version_int)
+    lockfile.pages[page_title].content_fingerprint = local_fingerprint
     save_lockfile(lockfile_path, lockfile)
 
     change = {

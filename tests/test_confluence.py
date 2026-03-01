@@ -12,6 +12,7 @@ from confpub.errors import (
     ERR_CONFLICT_PAGE_EXISTS,
     ERR_IO_CONNECTION,
     ERR_IO_FILE_NOT_FOUND,
+    ERR_VALIDATION_NOT_FOUND,
     ERR_INTERNAL_SDK,
     ERR_VALIDATION_REQUIRED,
     ConfpubError,
@@ -260,7 +261,7 @@ class TestErrorTranslation:
         client._mock_api.get_all_spaces.side_effect = Exception("404 Not Found")
         with pytest.raises(ConfpubError) as exc_info:
             client.list_spaces()
-        assert exc_info.value.code == ERR_IO_FILE_NOT_FOUND
+        assert exc_info.value.code == ERR_VALIDATION_NOT_FOUND
 
     def test_generic_error(self, client):
         client._mock_api.get_all_spaces.side_effect = Exception("Something weird happened")
@@ -322,7 +323,7 @@ class TestSlimPage:
 
 class TestSearch:
     def test_structured_results(self, client):
-        client._mock_api.cql.return_value = {
+        client._mock_api.get.return_value = {
             "results": [
                 {
                     "entityType": "content",
@@ -357,14 +358,14 @@ class TestSearch:
         assert r["container_title"] == "Development"
 
     def test_empty_results(self, client):
-        client._mock_api.cql.return_value = {"results": [], "totalSize": 0}
+        client._mock_api.get.return_value = {"results": [], "totalSize": 0}
         result = client.search('title = "nonexistent"')
         assert result["results"] == []
         assert result["total"] == 0
         assert result["has_more"] is False
 
     def test_has_more_pagination(self, client):
-        client._mock_api.cql.return_value = {
+        client._mock_api.get.return_value = {
             "results": [{"entityType": "content", "content": {"id": "1"}, "excerpt": ""}],
             "totalSize": 50,
         }
@@ -375,31 +376,34 @@ class TestSearch:
         assert result["limit"] == 10
 
     def test_invalid_cql_raises_validation(self, client):
-        client._mock_api.cql.side_effect = Exception("400 The query cannot be parsed")
+        client._mock_api.get.side_effect = Exception("400 The query cannot be parsed")
         with pytest.raises(ConfpubError) as exc_info:
             client.search("invalid!!")
         assert exc_info.value.code == ERR_VALIDATION_REQUIRED
 
     def test_auth_error(self, client):
-        client._mock_api.cql.side_effect = Exception("401 Unauthorized")
+        client._mock_api.get.side_effect = Exception("401 Unauthorized")
         with pytest.raises(ConfpubError) as exc_info:
             client.search("type = page")
         assert exc_info.value.code == ERR_AUTH_FORBIDDEN
 
     def test_include_archived_passthrough(self, client):
-        client._mock_api.cql.return_value = {"results": [], "totalSize": 0}
+        client._mock_api.get.return_value = {"results": [], "totalSize": 0}
         client.search("type = page", include_archived_spaces=True)
-        client._mock_api.cql.assert_called_once_with(
-            "type = page",
-            start=0,
-            limit=25,
-            excerpt="highlight",
-            include_archived_spaces=True,
+        client._mock_api.get.assert_called_once_with(
+            "rest/api/search",
+            params={
+                "cql": "type = page",
+                "start": 0,
+                "limit": 25,
+                "excerpt": "highlight",
+                "includeArchivedSpaces": True,
+            },
         )
 
     def test_excerpt_truncation(self, client):
         long_excerpt = "word " * 100  # 500 chars
-        client._mock_api.cql.return_value = {
+        client._mock_api.get.return_value = {
             "results": [{"entityType": "content", "content": {"id": "1"}, "excerpt": long_excerpt}],
             "totalSize": 1,
         }
