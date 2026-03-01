@@ -52,7 +52,7 @@ class TestGetPage:
         result = client.get_page("DEV", "Test")
         assert result["id"] == "123"
         client._mock_api.get_page_by_title.assert_called_once_with(
-            "DEV", "Test", expand="version,body.storage,space"
+            "DEV", "Test", expand="version,body.storage,space,ancestors"
         )
 
     def test_returns_none_when_not_found(self, client):

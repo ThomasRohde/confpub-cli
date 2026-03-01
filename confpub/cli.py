@@ -222,22 +222,31 @@ def page_inspect(
 def page_publish(
     file: str = typer.Argument(..., help="Markdown file to publish"),
     space: str = typer.Option(..., "--space", help="Confluence space key"),
-    parent: str = typer.Option(..., "--parent", help="Parent page title"),
+    parent: Optional[str] = typer.Option(None, "--parent", help="Parent page title"),
     title: Optional[str] = typer.Option(None, "--title", help="Page title (defaults to filename stem, hyphen/underscore→spaces, title-cased)"),
+    page_id: Optional[str] = typer.Option(None, "--page-id", help="Confluence page ID (skip lookup, update directly)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
     backup: bool = typer.Option(False, "--backup", help="Backup existing page before overwriting"),
 ) -> None:
     """Publish a single Markdown file to Confluence."""
     from confpub.publish import derive_title
     resolved_title = derive_title(file, title)
+    if not page_id and not parent:
+        raise ConfpubError(
+            "ERR_VALIDATION_REQUIRED",
+            "Either --page-id or --parent is required",
+        )
     target = {"space": space, "title": resolved_title, "file": file}
+    if page_id:
+        target["page_id"] = page_id
     with command_context("page.publish", target=target) as ctx:
         from confpub.publish import publish_page
         result = publish_page(
             file=file,
             space=space,
-            parent=parent,
+            parent=parent or "",
             title=title,
+            page_id=page_id,
             dry_run=dry_run,
             backup=backup,
             progress_callback=ctx,
@@ -284,15 +293,26 @@ def page_pull(
 
 @page_app.command("delete")
 def page_delete(
-    space: str = typer.Option(..., "--space", help="Confluence space key"),
-    title: str = typer.Option(..., "--title", help="Page title"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key"),
+    title: Optional[str] = typer.Option(None, "--title", help="Page title"),
+    page_id: Optional[str] = typer.Option(None, "--page-id", help="Confluence page ID"),
     cascade: bool = typer.Option(False, "--cascade", help="Also delete child pages"),
 ) -> None:
     """Delete a Confluence page."""
-    with command_context("page.delete", target={"space": space, "title": title}) as ctx:
+    with command_context("page.delete", target={"space": space, "title": title, "page_id": page_id}) as ctx:
+        if not page_id and not (space and title):
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "Either --page-id or both --space and --title are required",
+            )
         from confpub.confluence import build_client
         client = build_client()
-        result = client.delete_page_by_title(space, title, cascade=cascade)
+        if page_id:
+            if cascade:
+                client._delete_descendants(page_id)
+            result = client.delete_page(page_id)
+        else:
+            result = client.delete_page_by_title(space, title, cascade=cascade)
         ctx.result = result
 
 
@@ -435,6 +455,7 @@ def config_inspect() -> None:
 def search(
     cql: Optional[str] = typer.Option(None, "--cql", help="Raw CQL query"),
     space: Optional[str] = typer.Option(None, "--space", help="Filter by space key"),
+    title: Optional[str] = typer.Option(None, "--title", help="Search by page title (fuzzy match)"),
     content_type: Optional[str] = typer.Option(None, "--type", help="Filter by content type (page, blogpost, etc.)"),
     limit: int = typer.Option(25, "--limit", help="Maximum results to return"),
     start: int = typer.Option(0, "--start", help="Starting offset for pagination"),
@@ -442,12 +463,14 @@ def search(
     excerpt_length: int = typer.Option(200, "--excerpt-length", help="Max excerpt chars (0 = unlimited)"),
 ) -> None:
     """Search Confluence content using CQL."""
-    target = {"cql": cql, "space": space, "type": content_type}
+    target = {"cql": cql, "space": space, "title": title, "type": content_type}
     with command_context("search", target=target) as ctx:
         # Build effective CQL from flags
         fragments: list[str] = []
         if space:
             fragments.append(f'space = "{space}"')
+        if title:
+            fragments.append(f'title ~ "{title}"')
         if content_type:
             fragments.append(f'type = "{content_type}"')
         if cql:
@@ -456,7 +479,7 @@ def search(
         if not fragments:
             raise ConfpubError(
                 "ERR_VALIDATION_REQUIRED",
-                "At least one of --cql, --space, or --type is required",
+                "At least one of --cql, --space, --title, or --type is required",
             )
 
         effective_cql = " AND ".join(fragments)

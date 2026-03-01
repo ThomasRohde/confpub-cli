@@ -312,8 +312,11 @@ def pull_pages(
     manifest_file: str | None = None
     if generate_manifest:
         root_title = root_page.get("title", "")
+        # Determine the actual parent of the root page
+        ancestors = client.get_page_ancestors(root_id)
+        manifest_parent = ancestors[-1].get("title", root_title) if ancestors else root_title
         page_tree = _build_page_tree(all_pages, file_paths, root_id, output_dir)
-        manifest_yaml = generate_manifest_yaml(root_space, root_title, page_tree)
+        manifest_yaml = generate_manifest_yaml(root_space, manifest_parent, page_tree)
         manifest_path = os.path.join(output_dir, "confpub.yaml")
         Path(manifest_path).write_text(manifest_yaml, encoding="utf-8")
         manifest_file = manifest_path

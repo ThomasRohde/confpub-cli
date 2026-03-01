@@ -93,7 +93,7 @@ class ConfluenceClient:
         """Get a page by space key and title."""
         self._call_count += 1
         try:
-            result = self._api.get_page_by_title(space, title, expand="version,body.storage,space")
+            result = self._api.get_page_by_title(space, title, expand="version,body.storage,space,ancestors")
             return result if result else None
         except Exception as exc:
             self._handle_error(exc, "get_page")
@@ -103,7 +103,7 @@ class ConfluenceClient:
         """Get a page by its Confluence ID."""
         self._call_count += 1
         try:
-            return self._api.get_page_by_id(page_id, expand="version,body.storage,space")
+            return self._api.get_page_by_id(page_id, expand="version,body.storage,space,ancestors")
         except Exception as exc:
             self._handle_error(exc, "get_page_by_id")
             return {}
@@ -229,6 +229,16 @@ class ConfluenceClient:
                 break
             start += limit
         return all_children
+
+    def get_page_ancestors(self, page_id: str) -> list[dict[str, Any]]:
+        """Get the ancestor chain of a page (root first, immediate parent last)."""
+        self._call_count += 1
+        try:
+            page = self._api.get_page_by_id(page_id, expand="ancestors")
+            return page.get("ancestors", [])
+        except Exception as exc:
+            self._handle_error(exc, "get_page_ancestors")
+            return []
 
     # ------------------------------------------------------------------
     # Space operations
@@ -419,9 +429,14 @@ def _slim_page(page: dict[str, Any], *, base_url: str = "") -> dict[str, Any]:
     body = page.get("body", {}).get("storage", {}).get("value")
     if body is not None:
         result["body_storage"] = body
+    ancestors = page.get("ancestors")
+    if isinstance(ancestors, list) and ancestors:
+        parent = ancestors[-1]
+        result["parent_id"] = parent.get("id")
+        result["parent_title"] = parent.get("title")
     links = page.get("_links", {})
     if "webui" in links:
-        base = links.get("base", "") or base_url
+        base = base_url or links.get("base", "")
         result["webui"] = base + links["webui"]
     return result
 

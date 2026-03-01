@@ -58,11 +58,15 @@ def _mock_client(pages: dict[str, dict], children: dict[str, list] | None = None
     def download_attachment(pid, filename, path):
         return False
 
+    def get_page_ancestors(pid):
+        return []
+
     client.get_page_by_id = get_page_by_id
     client.get_page = get_page
     client.get_page_children_deep = get_page_children_deep
     client.get_attachments = get_attachments
     client.download_attachment = download_attachment
+    client.get_page_ancestors = get_page_ancestors
     return client
 
 

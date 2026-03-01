@@ -12,7 +12,7 @@ from confpub.verifier import verify_assertions
 
 SAMPLE_ASSERTIONS = [
     {"type": "page.exists", "space": "DEV", "title": "Overview"},
-    {"type": "page.parent", "title": "Child", "expected_parent": "Overview"},
+    {"type": "page.parent", "space": "DEV", "title": "Child", "expected_parent": "Overview"},
     {"type": "attachment.exists", "space": "DEV", "page": "Overview", "filename": "arch.png"},
 ]
 
@@ -31,6 +31,7 @@ class TestVerifyAssertions:
         mock_client = MagicMock()
         mock_client.get_page.return_value = {"id": "123", "title": "Overview"}
         mock_client.get_attachments.return_value = [{"title": "arch.png"}]
+        mock_client.get_page_ancestors.return_value = [{"id": "100", "title": "Overview"}]
         MockClient.return_value = mock_client
         mock_config.return_value = MagicMock()
 

@@ -35,6 +35,7 @@ def publish_page(
     space: str,
     parent: str,
     title: str | None = None,
+    page_id: str | None = None,
     dry_run: bool = False,
     backup: bool = False,
     progress_callback: Any = None,
@@ -73,7 +74,14 @@ def publish_page(
     existing_page_id = None
     current_version = None
 
-    if page_title in lockfile.pages:
+    if page_id:
+        # Direct page ID provided — skip lockfile/title lookup
+        existing_page_id = page_id
+        page_data = client.get_page_by_id(existing_page_id)
+        if page_data:
+            version = page_data.get("version", {})
+            current_version = version.get("number") if isinstance(version, dict) else version
+    elif page_title in lockfile.pages:
         existing_page_id = lockfile.pages[page_title].page_id
         page_data = client.get_page_by_id(existing_page_id)
         if page_data:
@@ -98,6 +106,12 @@ def publish_page(
 
     # Determine operation
     operation = "update" if existing_page_id else "create"
+
+    # Detect noop — skip update when content is unchanged
+    if operation == "update":
+        remote_fingerprint = client.fingerprint_page(existing_page_id)
+        if remote_fingerprint and remote_fingerprint == local_fingerprint:
+            operation = "noop"
 
     if dry_run:
         change: dict[str, Any] = {
@@ -124,6 +138,18 @@ def publish_page(
         return result_dict
 
     # Real publish
+    if operation == "noop":
+        return {
+            "dry_run": False,
+            "changes": [{
+                "type": "page.noop",
+                "title": page_title,
+                "confluence_page_id": existing_page_id,
+                "before": {"version": current_version} if current_version else None,
+            }],
+            "summary": {"noop": 1},
+        }
+
     backup_file_path: str | None = None
     if operation == "create":
         # Find parent page

@@ -35,7 +35,6 @@ def _load_assertions(assertions_path: str | None, plan_path: str | None) -> list
             raise ConfpubError(ERR_VALIDATION_MANIFEST, f"Invalid assertions JSON: {exc}") from exc
 
     if plan_path:
-        # Try to load assertions from the plan's source manifest
         p = Path(plan_path)
         if not p.exists():
             raise ConfpubError(
@@ -44,9 +43,33 @@ def _load_assertions(assertions_path: str | None, plan_path: str | None) -> list
                 retryable=False,
                 suggested_action="fix_input",
             )
+
+        # Check for confpub.yaml alongside the plan file
+        manifest_path = p.parent / "confpub.yaml"
+        if manifest_path.exists():
+            try:
+                import yaml
+                manifest_data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(manifest_data, dict) and manifest_data.get("assertions"):
+                    raw = manifest_data["assertions"]
+                    if isinstance(raw, list):
+                        return raw
+            except Exception:
+                pass
+
+        # Auto-generate page.exists assertions from the plan
         plan_data = json.loads(p.read_text(encoding="utf-8"))
-        # Plan doesn't contain assertions directly — return empty
-        return []
+        auto: list[dict[str, Any]] = []
+        space = plan_data.get("space", "")
+        for page in plan_data.get("pages", []):
+            op = page.get("operation", "")
+            if op in ("create", "update"):
+                auto.append({
+                    "type": "page.exists",
+                    "space": space,
+                    "title": page.get("title", ""),
+                })
+        return auto
 
     return []
 
@@ -88,14 +111,22 @@ def verify_assertions(
                 all_passed = False
 
         elif a_type == "page.parent":
+            space = assertion.get("space", "")
             title = assertion.get("title", "")
             expected_parent = assertion.get("expected_parent", "")
             result["title"] = title
-            # Get page and check its parent
-            # This is a simplified check — in a full implementation
-            # we'd look up the page's ancestor chain
-            result["passed"] = True  # Simplified for now
             result["expected_parent"] = expected_parent
+            page = client.get_page(space, title) if space else None
+            if page:
+                ancestors = client.get_page_ancestors(str(page["id"]))
+                actual_parent = ancestors[-1].get("title", "") if ancestors else ""
+                result["actual_parent"] = actual_parent
+                result["passed"] = actual_parent == expected_parent
+            else:
+                result["passed"] = False
+                result["error"] = f"Page '{title}' not found"
+            if not result["passed"]:
+                all_passed = False
 
         elif a_type == "attachment.exists":
             page_title = assertion.get("page", "")

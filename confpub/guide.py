@@ -65,7 +65,7 @@ def build_guide() -> dict[str, Any]:
                 "group": "read",
                 "mutates": False,
                 "description": "Search Confluence content using CQL",
-                "flags": ["--cql", "--space", "--type", "--limit", "--start", "--include-archived", "--excerpt-length"],
+                "flags": ["--cql", "--space", "--title", "--type", "--limit", "--start", "--include-archived", "--excerpt-length"],
                 "agent_hint": "Most agent workflows should include --type page to exclude attachments and space entities from results.",
                 "result_schema": {
                     "cql_query": "string — effective CQL sent to the API",
@@ -79,6 +79,7 @@ def build_guide() -> dict[str, Any]:
                     'confpub search --cql \'label = "api-docs"\'',
                     "confpub search --space DEV --type page --limit 10",
                     'confpub search --space DEV --cql \'title ~ "deploy"\'',
+                    'confpub search --title "deploy guide" --space DEV',
                 ],
             },
             "page.list": {
@@ -97,7 +98,7 @@ def build_guide() -> dict[str, Any]:
                 "group": "write",
                 "mutates": True,
                 "description": "Publish a single Markdown file to Confluence",
-                "flags": ["--space", "--parent", "--title", "--dry-run", "--backup"],
+                "flags": ["--space", "--parent", "--title", "--page-id", "--dry-run", "--backup"],
             },
             "page.pull": {
                 "group": "read",
@@ -116,7 +117,7 @@ def build_guide() -> dict[str, Any]:
                 "group": "write",
                 "mutates": True,
                 "description": "Delete a Confluence page",
-                "flags": ["--space", "--title", "--cascade"],
+                "flags": ["--space", "--title", "--page-id", "--cascade"],
                 "safety_flags": {
                     "--cascade": "Also deletes child pages",
                 },
@@ -247,6 +248,28 @@ def build_guide() -> dict[str, Any]:
                 "Used by plan.create to detect existing pages and versions",
                 "Does not prevent concurrent operations — purely local state tracking",
             ],
+        },
+        "assertions": {
+            "description": "Post-condition assertions verified by plan.verify.",
+            "file_format": "JSON array of assertion objects, or embedded in confpub.yaml under the 'assertions' key.",
+            "auto_generation": "When --plan is passed without --assertions, plan.verify auto-generates page.exists assertions for every create/update page in the plan.",
+            "types": {
+                "page.exists": {
+                    "description": "Verify that a page exists in the given space.",
+                    "required_fields": ["type", "space", "title"],
+                    "example": {"type": "page.exists", "space": "DEV", "title": "My Page"},
+                },
+                "page.parent": {
+                    "description": "Verify that a page has the expected parent.",
+                    "required_fields": ["type", "space", "title", "expected_parent"],
+                    "example": {"type": "page.parent", "space": "DEV", "title": "My Page", "expected_parent": "Parent Page"},
+                },
+                "attachment.exists": {
+                    "description": "Verify that an attachment exists on a page.",
+                    "required_fields": ["type", "space", "page", "filename"],
+                    "example": {"type": "attachment.exists", "space": "DEV", "page": "My Page", "filename": "diagram.png"},
+                },
+            },
         },
         "auth": {
             "precedence": [
