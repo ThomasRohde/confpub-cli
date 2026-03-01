@@ -364,12 +364,12 @@ pytest tests/ -v --cov=confpub
 
 ### Releasing
 
-Version is defined in `confpub/__init__.py`. Use `hatch version` to bump it:
+Version is defined in `confpub/__init__.py`. Use `uvx hatch` to bump it:
 
 ```bash
-hatch version patch    # 0.2.1 → 0.2.2
-hatch version minor    # 0.2.1 → 0.3.0
-hatch version major    # 0.2.1 → 1.0.0
+uvx hatch version patch    # 0.2.1 → 0.2.2
+uvx hatch version minor    # 0.2.1 → 0.3.0
+uvx hatch version major    # 0.2.1 → 1.0.0
 ```
 
 Then commit and push to `main` — GitHub Actions will publish to PyPI automatically.
