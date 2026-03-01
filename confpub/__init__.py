@@ -1,3 +1,3 @@
 """confpub — Agent-first CLI to publish Markdown to Confluence."""
 
-__version__ = "0.2.5"
+__version__ = "0.3.0"

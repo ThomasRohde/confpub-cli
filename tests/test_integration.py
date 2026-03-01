@@ -31,6 +31,19 @@ class TestCLIHelp:
         assert "list" in result.output
         assert "inspect" in result.output
         assert "delete" in result.output
+        assert "pull" in result.output
+
+    def test_page_pull_help(self):
+        result = runner.invoke(app, ["page", "pull", "--help"])
+        assert result.exit_code == 0
+        assert "--space" in result.output
+        assert "--title" in result.output
+        assert "--page-id" in result.output
+        assert "--recursive" in result.output
+        assert "--force" in result.output
+        assert "--layout" in result.output
+        assert "--no-attachments" in result.output
+        assert "--output" in result.output
 
     def test_plan_help(self):
         result = runner.invoke(app, ["plan", "--help"])
@@ -76,6 +89,15 @@ class TestGuideCommand:
     def test_guide_invalid_section(self):
         result = runner.invoke(app, ["guide", "--section", "nonexistent"])
         assert result.exit_code == 10  # Validation error
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_REQUIRED"
+
+
+class TestPagePullValidation:
+    def test_pull_without_args_returns_validation_error(self):
+        result = runner.invoke(app, ["page", "pull"])
+        assert result.exit_code == 10
         data = json.loads(result.output)
         assert data["ok"] is False
         assert data["errors"][0]["code"] == "ERR_VALIDATION_REQUIRED"

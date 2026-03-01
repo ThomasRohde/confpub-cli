@@ -169,6 +169,34 @@ def load_manifest(path: str) -> Manifest:
         ) from exc
 
 
+def generate_manifest_yaml(
+    space: str,
+    parent: str,
+    page_tree: list[dict[str, Any]],
+) -> str:
+    """Generate a confpub.yaml manifest string from a pulled page tree.
+
+    Each entry in page_tree should have: title, file, children (list of same shape).
+    """
+    def _build_pages(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        result = []
+        for p in pages:
+            entry: dict[str, Any] = {"title": p["title"], "file": p["file"]}
+            children = p.get("children", [])
+            if children:
+                entry["children"] = _build_pages(children)
+            result.append(entry)
+        return result
+
+    manifest_data: dict[str, Any] = {
+        "schema_version": "1.0",
+        "space": space,
+        "parent": parent,
+        "pages": _build_pages(page_tree),
+    }
+    return yaml.dump(manifest_data, default_flow_style=False, sort_keys=False)
+
+
 def resolve_page_tree(manifest: Manifest) -> list[FlatPage]:
     """Flatten the recursive page tree into a list with parent references.
 

@@ -220,6 +220,41 @@ def page_publish(
         ctx.result = result
 
 
+@page_app.command("pull")
+def page_pull(
+    space: str = typer.Option(None, "--space", help="Confluence space key"),
+    title: str = typer.Option(None, "--title", help="Page title"),
+    page_id: str = typer.Option(None, "--page-id", help="Confluence page ID"),
+    output: str = typer.Option(".", "--output", "-o", help="Output directory"),
+    recursive: bool = typer.Option(False, "--recursive", "-r", help="Pull child pages recursively"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing files"),
+    layout: str = typer.Option("flat", "--layout", help="Output layout: flat or nested"),
+    no_attachments: bool = typer.Option(False, "--no-attachments", help="Skip downloading attachments"),
+) -> None:
+    """Pull Confluence pages to local Markdown files."""
+    target = {"space": space, "title": title, "page_id": page_id}
+    with command_context("page.pull", target=target) as ctx:
+        from confpub.errors import ERR_VALIDATION_REQUIRED
+        if not page_id and not (space and title):
+            raise ConfpubError(
+                ERR_VALIDATION_REQUIRED,
+                "Either --page-id or both --space and --title are required",
+            )
+        from confpub.puller import pull_pages
+        result = pull_pages(
+            space=space,
+            title=title,
+            page_id=page_id,
+            output_dir=output,
+            recursive=recursive,
+            force=force,
+            layout=layout,
+            include_attachments=not no_attachments,
+        )
+        ctx.warnings.extend(result.pop("warnings", []))
+        ctx.result = result
+
+
 @page_app.command("delete")
 def page_delete(
     space: str = typer.Option(..., "--space", help="Confluence space key"),

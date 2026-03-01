@@ -82,7 +82,7 @@ class ConfluenceClient:
     def get_page(self, space: str, title: str) -> dict[str, Any] | None:
         """Get a page by space key and title."""
         try:
-            result = self._api.get_page_by_title(space, title, expand="version,body.storage")
+            result = self._api.get_page_by_title(space, title, expand="version,body.storage,space")
             return result if result else None
         except Exception as exc:
             self._handle_error(exc, "get_page")
@@ -181,6 +181,17 @@ class ConfluenceClient:
             self._handle_error(exc, "get_page_children")
             return []
 
+    def get_page_children_deep(self, page_id: str) -> list[dict[str, Any]]:
+        """Get child pages with version and body.storage expanded."""
+        try:
+            result = self._api.get_page_child_by_type(
+                page_id, type="page", expand="version,body.storage",
+            )
+            return result if isinstance(result, list) else []
+        except Exception as exc:
+            self._handle_error(exc, "get_page_children_deep")
+            return []
+
     # ------------------------------------------------------------------
     # Space operations
     # ------------------------------------------------------------------
@@ -219,6 +230,51 @@ class ConfluenceClient:
         except Exception as exc:
             self._handle_error(exc, "get_attachments")
             return []
+
+    def download_attachment(self, page_id: str, filename: str, download_path: str) -> bool:
+        """Download an attachment from a page to a local file.
+
+        Returns True if the download succeeded, False if the attachment was
+        not found or the download failed.  Failures are logged but do NOT
+        raise — callers can skip individual attachments without aborting the
+        entire pull.
+        """
+        import os
+
+        attachments = self.get_attachments(page_id)
+        target = None
+        for att in attachments:
+            if att.get("title") == filename:
+                target = att
+                break
+        if target is None:
+            return False
+
+        download_url = target.get("_links", {}).get("download", "")
+        if not download_url:
+            return False
+
+        try:
+            # If the API already returned an absolute URL, use it directly.
+            # Otherwise, prepend self._api.url which includes the context
+            # path (e.g. /wiki on Cloud, or /confluence on some DC setups).
+            if download_url.startswith(("http://", "https://")):
+                full_url = download_url
+            else:
+                full_url = self._api.url.rstrip("/") + download_url
+
+            response = self._api._session.get(full_url, stream=True)
+            response.raise_for_status()
+
+            os.makedirs(os.path.dirname(download_path), exist_ok=True)
+            with open(download_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return True
+        except Exception:
+            # Attachment download failures are non-fatal — the caller
+            # records a warning and continues with the remaining files.
+            return False
 
     def upload_attachment(self, page_id: str, filepath: str) -> dict[str, Any]:
         """Upload an attachment to a page."""

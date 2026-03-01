@@ -51,7 +51,7 @@ class TestGetPage:
         result = client.get_page("DEV", "Test")
         assert result["id"] == "123"
         client._mock_api.get_page_by_title.assert_called_once_with(
-            "DEV", "Test", expand="version,body.storage"
+            "DEV", "Test", expand="version,body.storage,space"
         )
 
     def test_returns_none_when_not_found(self, client):
@@ -125,6 +125,80 @@ class TestAttachments:
         client._mock_api.attach_file.return_value = {"title": "file.png"}
         result = client.upload_attachment("123", "/tmp/file.png")
         assert result["title"] == "file.png"
+
+
+class TestDownloadAttachment:
+    def test_relative_url_uses_api_url(self, client, tmp_path):
+        """Relative _links.download paths are prefixed with self._api.url."""
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"title": "doc.pdf", "_links": {"download": "/download/attachments/99/doc.pdf"}}]
+        }
+        client._mock_api.url = "https://test.atlassian.net/wiki"
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [b"PDF_DATA"]
+        client._mock_api._session.get.return_value = mock_resp
+
+        dest = str(tmp_path / "doc.pdf")
+        result = client.download_attachment("99", "doc.pdf", dest)
+
+        assert result is True
+        called_url = client._mock_api._session.get.call_args[0][0]
+        assert called_url == "https://test.atlassian.net/wiki/download/attachments/99/doc.pdf"
+
+    def test_absolute_url_used_directly(self, client, tmp_path):
+        """If _links.download is already absolute, do not prepend base URL."""
+        abs_url = "https://cdn.corp.com/files/doc.pdf"
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"title": "doc.pdf", "_links": {"download": abs_url}}]
+        }
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [b"DATA"]
+        client._mock_api._session.get.return_value = mock_resp
+
+        dest = str(tmp_path / "doc.pdf")
+        result = client.download_attachment("99", "doc.pdf", dest)
+
+        assert result is True
+        called_url = client._mock_api._session.get.call_args[0][0]
+        assert called_url == abs_url
+
+    def test_dc_context_path_preserved(self, client, tmp_path):
+        """DC behind /confluence context path must produce correct download URL."""
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"title": "img.png", "_links": {"download": "/download/attachments/1/img.png"}}]
+        }
+        client._mock_api.url = "https://corp.com/confluence"
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [b"PNG"]
+        client._mock_api._session.get.return_value = mock_resp
+
+        dest = str(tmp_path / "img.png")
+        result = client.download_attachment("1", "img.png", dest)
+
+        assert result is True
+        called_url = client._mock_api._session.get.call_args[0][0]
+        assert called_url == "https://corp.com/confluence/download/attachments/1/img.png"
+
+    def test_download_failure_returns_false(self, client, tmp_path):
+        """HTTP errors during download should return False, not raise."""
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"title": "bad.zip", "_links": {"download": "/download/bad.zip"}}]
+        }
+        client._mock_api.url = "https://test.atlassian.net/wiki"
+        client._mock_api._session.get.side_effect = Exception("500 Server Error")
+
+        dest = str(tmp_path / "bad.zip")
+        result = client.download_attachment("1", "bad.zip", dest)
+
+        assert result is False
+
+    def test_attachment_not_found_returns_false(self, client, tmp_path):
+        """Requesting a filename not in the attachments list returns False."""
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"title": "other.png", "_links": {"download": "/dl/other.png"}}]
+        }
+        result = client.download_attachment("1", "missing.png", str(tmp_path / "x"))
+        assert result is False
 
 
 class TestFingerprint:

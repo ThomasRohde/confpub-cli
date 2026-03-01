@@ -13,10 +13,12 @@ from confpub.errors import (
     ERR_AUTH_EXPIRED,
     ERR_AUTH_FORBIDDEN,
     ERR_AUTH_REQUIRED,
+    ERR_CONFLICT_FILE_EXISTS,
     ERR_CONFLICT_FINGERPRINT,
     ERR_CONFLICT_LOCK,
     ERR_CONFLICT_PAGE_EXISTS,
     ERR_INTERNAL_CONVERTER,
+    ERR_INTERNAL_REVERSE_CONVERTER,
     ERR_INTERNAL_SDK,
     ERR_IO_CONNECTION,
     ERR_IO_FILE_NOT_FOUND,
@@ -74,6 +76,19 @@ def build_guide() -> dict[str, Any]:
                 "mutates": True,
                 "description": "Publish a single Markdown file to Confluence",
                 "flags": ["--space", "--parent", "--title", "--dry-run", "--backup"],
+            },
+            "page.pull": {
+                "group": "read",
+                "mutates": False,
+                "description": "Pull Confluence pages to local Markdown files",
+                "flags": [
+                    "--space", "--title", "--page-id",
+                    "--output", "--recursive", "--force",
+                    "--layout", "--no-attachments",
+                ],
+                "safety_flags": {
+                    "--force": "Overwrites existing local files without confirmation",
+                },
             },
             "page.delete": {
                 "group": "write",
@@ -166,12 +181,14 @@ def build_guide() -> dict[str, Any]:
             ERR_CONFLICT_FINGERPRINT: _error_code_entry(ERR_CONFLICT_FINGERPRINT),
             ERR_CONFLICT_LOCK: _error_code_entry(ERR_CONFLICT_LOCK),
             ERR_CONFLICT_PAGE_EXISTS: _error_code_entry(ERR_CONFLICT_PAGE_EXISTS),
+            ERR_CONFLICT_FILE_EXISTS: _error_code_entry(ERR_CONFLICT_FILE_EXISTS),
             ERR_IO_FILE_NOT_FOUND: _error_code_entry(ERR_IO_FILE_NOT_FOUND),
             ERR_IO_CONNECTION: _error_code_entry(
                 ERR_IO_CONNECTION, retry_after_ms=2000,
             ),
             ERR_IO_TIMEOUT: _error_code_entry(ERR_IO_TIMEOUT, retry_after_ms=2000),
             ERR_INTERNAL_CONVERTER: _error_code_entry(ERR_INTERNAL_CONVERTER),
+            ERR_INTERNAL_REVERSE_CONVERTER: _error_code_entry(ERR_INTERNAL_REVERSE_CONVERTER),
             ERR_INTERNAL_SDK: _error_code_entry(ERR_INTERNAL_SDK),
         },
         "concurrency": {
