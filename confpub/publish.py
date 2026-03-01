@@ -12,7 +12,7 @@ from typing import Any
 
 from confpub.assets import discover_assets, rewrite_image_urls, upload_assets
 from confpub.config import load_config
-from confpub.confluence import ConfluenceClient
+from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, fingerprint_content
 from confpub.errors import (
     ERR_IO_FILE_NOT_FOUND,
@@ -202,7 +202,14 @@ def publish_page(
         "title": page_title,
         "confluence_page_id": page_id,
         "before": {"version": current_version} if current_version else None,
-        "after": {"version": new_version, "page_id": page_id},
+        "after": {
+            "version": new_version,
+            "page_id": page_id,
+            "webui": build_page_url(
+                config.base_url or "", config.is_cloud,
+                space, page_id, page_title,
+            ),
+        },
     }
     if backup_file_path:
         change["backup_path"] = backup_file_path

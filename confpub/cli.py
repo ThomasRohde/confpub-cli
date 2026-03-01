@@ -189,7 +189,7 @@ def page_list(
         from confpub.confluence import build_client, _slim_page
         client = build_client()
         pages = client.list_pages(space, start=start, limit=limit)
-        ctx.result = {"pages": [_slim_page(p, base_url=client._config.base_url.rstrip("/")) for p in pages]}
+        ctx.result = {"pages": [_slim_page(p, base_url=client._config.base_url.rstrip("/"), is_cloud=client._config.is_cloud) for p in pages]}
 
 
 @page_app.command("inspect")
@@ -217,7 +217,7 @@ def page_inspect(
         if raw:
             ctx.result = page
         else:
-            result = _slim_page(page, base_url=client._config.base_url.rstrip("/"))
+            result = _slim_page(page, base_url=client._config.base_url.rstrip("/"), is_cloud=client._config.is_cloud)
             if format == "markdown" and "body_storage" in result:
                 from confpub.reverse_converter import convert_storage_to_markdown
                 conversion = convert_storage_to_markdown(result["body_storage"])

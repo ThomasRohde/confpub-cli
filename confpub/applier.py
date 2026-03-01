@@ -13,7 +13,7 @@ from typing import Any
 
 from confpub.assets import AssetRef, discover_assets, rewrite_image_urls, upload_assets
 from confpub.config import load_config
-from confpub.confluence import ConfluenceClient
+from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, fingerprint_content
 from confpub.errors import ERR_CONFLICT_FINGERPRINT, ERR_IO_FILE_NOT_FOUND, ConfpubError
 from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, update_lockfile
@@ -113,6 +113,10 @@ def apply_plan(
                     new_version = new_version.get("number", 1)
                 change["after"]["page_id"] = new_id
                 change["after"]["version"] = new_version
+                change["after"]["webui"] = build_page_url(
+                    config.base_url or "", config.is_cloud,
+                    plan.space, new_id, page.title,
+                )
 
                 # Upload attachments
                 if assets:
@@ -167,6 +171,10 @@ def apply_plan(
                 if isinstance(new_version, dict):
                     new_version = new_version.get("number", (before_version or 0) + 1)
                 change["after"]["version"] = new_version
+                change["after"]["webui"] = build_page_url(
+                    config.base_url or "", config.is_cloud,
+                    plan.space, page.confluence_page_id, page.title,
+                )
 
                 # Upload attachments
                 if assets:

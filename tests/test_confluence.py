@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from confpub.config import ResolvedConfig
-from confpub.confluence import ConfluenceClient, _slim_page, _slim_search_result
+from confpub.confluence import ConfluenceClient, _slim_page, _slim_search_result, _webui_base, build_page_url
 from confpub.errors import (
     ERR_AUTH_FORBIDDEN,
     ERR_AUTH_REQUIRED,
@@ -313,6 +313,36 @@ class TestSlimPage:
         result = _slim_page(page)
         assert result["webui"] == "https://wiki.example.com/spaces/DEV/pages/1"
 
+    def test_cloud_webui_adds_wiki_prefix(self):
+        """Cloud URLs need /wiki between base and webui path."""
+        page = {
+            "id": "1",
+            "title": "T",
+            "_links": {"webui": "/spaces/SD/pages/98376/What+Works+Well"},
+        }
+        result = _slim_page(page, base_url="https://myorg.atlassian.net", is_cloud=True)
+        assert result["webui"] == "https://myorg.atlassian.net/wiki/spaces/SD/pages/98376/What+Works+Well"
+
+    def test_cloud_webui_no_double_wiki(self):
+        """If base_url already ends with /wiki, don't duplicate it."""
+        page = {
+            "id": "1",
+            "title": "T",
+            "_links": {"webui": "/spaces/SD/pages/1"},
+        }
+        result = _slim_page(page, base_url="https://myorg.atlassian.net/wiki", is_cloud=True)
+        assert result["webui"] == "https://myorg.atlassian.net/wiki/spaces/SD/pages/1"
+
+    def test_dc_webui_no_wiki_prefix(self):
+        """DC/Server URLs should NOT get /wiki prefix."""
+        page = {
+            "id": "1",
+            "title": "T",
+            "_links": {"webui": "/spaces/DEV/pages/1"},
+        }
+        result = _slim_page(page, base_url="https://confluence.corp.com", is_cloud=False)
+        assert result["webui"] == "https://confluence.corp.com/spaces/DEV/pages/1"
+
     def test_omits_missing_optional_fields(self):
         page = {"id": "1", "title": "T"}
         result = _slim_page(page)
@@ -496,3 +526,38 @@ class TestSlimSearchResult:
         result = _slim_search_result(item, excerpt_length=30)
         assert result["excerpt"].endswith("…")
         assert len(result["excerpt"]) <= 35
+
+
+class TestWebuiBase:
+    def test_cloud_without_wiki(self):
+        assert _webui_base("https://myorg.atlassian.net", True) == "https://myorg.atlassian.net/wiki"
+
+    def test_cloud_with_wiki(self):
+        assert _webui_base("https://myorg.atlassian.net/wiki", True) == "https://myorg.atlassian.net/wiki"
+
+    def test_cloud_trailing_slash(self):
+        assert _webui_base("https://myorg.atlassian.net/", True) == "https://myorg.atlassian.net/wiki"
+
+    def test_dc_plain(self):
+        assert _webui_base("https://confluence.corp.com", False) == "https://confluence.corp.com"
+
+    def test_dc_context_path(self):
+        assert _webui_base("https://corp.com/confluence", False) == "https://corp.com/confluence"
+
+
+class TestBuildPageUrl:
+    def test_cloud_with_title(self):
+        url = build_page_url("https://myorg.atlassian.net", True, "SD", "12345", "My Page")
+        assert url == "https://myorg.atlassian.net/wiki/spaces/SD/pages/12345/My+Page"
+
+    def test_cloud_without_title(self):
+        url = build_page_url("https://myorg.atlassian.net", True, "SD", "12345")
+        assert url == "https://myorg.atlassian.net/wiki/spaces/SD/pages/12345"
+
+    def test_dc_with_title(self):
+        url = build_page_url("https://confluence.corp.com", False, "DEV", "456", "Test Page")
+        assert url == "https://confluence.corp.com/spaces/DEV/pages/456/Test+Page"
+
+    def test_dc_without_title(self):
+        url = build_page_url("https://confluence.corp.com", False, "DEV", "456")
+        assert url == "https://confluence.corp.com/spaces/DEV/pages/456"

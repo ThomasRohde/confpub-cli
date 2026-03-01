@@ -267,7 +267,8 @@ class ConfluenceClient:
                 raw = result
             else:
                 raw = []
-            return [_slim_space(s) for s in raw]
+            base_url = self._config.base_url.rstrip("/") if self._config.base_url else ""
+            return [_slim_space(s, base_url=base_url, is_cloud=self._config.is_cloud) for s in raw]
         except Exception as exc:
             self._handle_error(exc, "list_spaces")
             return []
@@ -407,7 +408,7 @@ class ConfluenceClient:
         api_limit = raw.get("limit", limit) if isinstance(raw, dict) else limit
 
         results = [
-            _slim_search_result(r, base_url=base_url, excerpt_length=excerpt_length)
+            _slim_search_result(r, base_url=base_url, is_cloud=self._config.is_cloud, excerpt_length=excerpt_length)
             for r in results_raw
         ]
         return {
@@ -433,7 +434,30 @@ class ConfluenceClient:
             return None
 
 
-def _slim_page(page: dict[str, Any], *, base_url: str = "") -> dict[str, Any]:
+def _webui_base(base_url: str, is_cloud: bool) -> str:
+    """Return the correct base URL for webui links.
+
+    Cloud instances need ``/wiki`` in the path; DC/Server do not.
+    Handles base_url configured with or without the ``/wiki`` suffix.
+    """
+    base = base_url.rstrip("/")
+    if is_cloud and not base.endswith("/wiki"):
+        base += "/wiki"
+    return base
+
+
+def build_page_url(
+    base_url: str, is_cloud: bool, space: str, page_id: str, title: str = "",
+) -> str:
+    """Construct a full webui URL for a Confluence page."""
+    base = _webui_base(base_url, is_cloud)
+    if title:
+        encoded_title = title.replace(" ", "+")
+        return f"{base}/spaces/{space}/pages/{page_id}/{encoded_title}"
+    return f"{base}/spaces/{space}/pages/{page_id}"
+
+
+def _slim_page(page: dict[str, Any], *, base_url: str = "", is_cloud: bool = False) -> dict[str, Any]:
     """Extract agent-relevant fields from a raw Confluence page object."""
     result: dict[str, Any] = {
         "id": page.get("id"),
@@ -456,12 +480,12 @@ def _slim_page(page: dict[str, Any], *, base_url: str = "") -> dict[str, Any]:
         result["parent_title"] = parent.get("title")
     links = page.get("_links", {})
     if "webui" in links:
-        base = base_url or links.get("base", "")
+        base = _webui_base(base_url, is_cloud) if base_url else links.get("base", "")
         result["webui"] = base + links["webui"]
     return result
 
 
-def _slim_space(space: dict[str, Any]) -> dict[str, Any]:
+def _slim_space(space: dict[str, Any], *, base_url: str = "", is_cloud: bool = False) -> dict[str, Any]:
     """Extract agent-relevant fields from a raw Confluence space object."""
     result: dict[str, Any] = {
         "id": space.get("id"),
@@ -478,7 +502,12 @@ def _slim_space(space: dict[str, Any]) -> dict[str, Any]:
                 result["description"] = value
     links = space.get("_links", {})
     if "webui" in links:
-        result["webui"] = links.get("webui", "")
+        webui_path = links.get("webui", "")
+        if base_url and webui_path:
+            base = _webui_base(base_url, is_cloud)
+            result["webui"] = base + webui_path
+        else:
+            result["webui"] = webui_path
     return result
 
 
@@ -511,6 +540,7 @@ def _slim_search_result(
     item: dict[str, Any],
     *,
     base_url: str = "",
+    is_cloud: bool = False,
     excerpt_length: int = 0,
 ) -> dict[str, Any]:
     """Extract agent-relevant fields from a raw Confluence search result.
@@ -536,7 +566,7 @@ def _slim_search_result(
 
         webui = content.get("_links", {}).get("webui", "")
         if webui:
-            _set("url", base_url + webui)
+            _set("url", _webui_base(base_url, is_cloud) + webui if base_url else webui)
 
         _set("space_key", content.get("space", {}).get("key"))
 
