@@ -4,9 +4,22 @@
 
 Publish one file or an entire documentation tree — from the terminal, a CI pipeline, or an LLM agent. Every command returns structured JSON. Every error has a stable code. One call to `confpub guide` gives an agent everything it needs to drive the tool zero-shot.
 
+## Installation
+
+Run directly with `uvx` (no install needed):
+
+```bash
+uvx confpub-cli --help
 ```
-pip install confpub
+
+Or install permanently:
+
+```bash
+uv tool install confpub-cli   # recommended
+pip install confpub-cli        # alternative
 ```
+
+Once installed, the command is available as both `confpub` and `confpub-cli`.
 
 ---
 
@@ -337,8 +350,10 @@ confpub guide --section commands       # Just commands
 ## Development
 
 ```bash
-# Install in editable mode with dev dependencies
-pip install -e ".[dev]"
+# Clone and install with dev dependencies
+git clone https://github.com/ThomasRohde/confpub-cli.git
+cd confpub-cli
+uv pip install -e ".[dev]"
 
 # Run tests
 pytest tests/ -v
@@ -346,6 +361,18 @@ pytest tests/ -v
 # Run with coverage
 pytest tests/ -v --cov=confpub
 ```
+
+### Releasing
+
+Version is defined in `confpub/__init__.py`. Use `hatch version` to bump it:
+
+```bash
+hatch version patch    # 0.2.1 → 0.2.2
+hatch version minor    # 0.2.1 → 0.3.0
+hatch version major    # 0.2.1 → 1.0.0
+```
+
+Then commit and push to `main` — GitHub Actions will publish to PyPI automatically.
 
 ### Project Structure
 

@@ -49,10 +49,12 @@ Issues = "https://github.com/ThomasRohde/confpub-cli/issues"
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "hatch>=1.0",
 ]
 
 [project.scripts]
 confpub = "confpub.cli:run"
+confpub-cli = "confpub.cli:run"
 
 [tool.hatch.version]
 path = "confpub/__init__.py"
