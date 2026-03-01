@@ -81,6 +81,28 @@ class TestGuideCommand:
         assert data["errors"][0]["code"] == "ERR_VALIDATION_REQUIRED"
 
 
+class TestPersonalSpaceKeyCLI:
+    """Ensure ~username personal space keys (e.g. ~thro) pass through CLI correctly."""
+
+    def test_space_tilde_in_page_list(self, monkeypatch):
+        """--space ~thro must arrive as literal '~thro' in the command handler."""
+        captured = {}
+
+        def fake_list_pages(self, space):
+            captured["space"] = space
+            return []
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+
+        result = runner.invoke(app, ["page", "list", "--space", "~thro"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        assert captured["space"] == "~thro"
+
+
 class TestEnvelopeContract:
     def test_guide_returns_full_envelope(self):
         result = runner.invoke(app, ["guide"])

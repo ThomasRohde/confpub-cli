@@ -203,6 +203,54 @@ class TestManifestValidationErrors:
         assert "parent" in fields
 
 
+class TestPersonalSpaceKey:
+    """Confluence personal spaces use ~username (e.g. ~thro).
+
+    The tilde must survive YAML parsing (bare ~ is YAML null) and must
+    not be subject to OS path expansion.
+    """
+
+    def test_tilde_space_in_model(self):
+        m = Manifest(space="~thro", parent="Home")
+        assert m.space == "~thro"
+
+    def test_tilde_space_in_yaml(self, tmp_path):
+        f = tmp_path / "confpub.yaml"
+        f.write_text('space: "~thro"\nparent: Home\n')
+        m = load_manifest(str(f))
+        assert m.space == "~thro"
+
+    def test_tilde_space_unquoted_yaml(self, tmp_path):
+        """~thro without quotes is a valid YAML string (only bare ~ is null)."""
+        f = tmp_path / "confpub.yaml"
+        f.write_text("space: ~thro\nparent: Home\n")
+        m = load_manifest(str(f))
+        assert m.space == "~thro"
+
+    def test_bare_tilde_rejected(self, tmp_path):
+        """Bare ~ is YAML null, so Pydantic should reject it."""
+        f = tmp_path / "confpub.yaml"
+        f.write_text("space: ~\nparent: Home\n")
+        with pytest.raises(ConfpubError) as exc_info:
+            load_manifest(str(f))
+        assert exc_info.value.code == ERR_VALIDATION_MANIFEST
+
+    def test_tilde_space_in_plan_artifact(self):
+        plan = PlanArtifact(space="~thro", parent="Home")
+        assert plan.space == "~thro"
+
+    def test_resolve_tree_preserves_tilde_space(self):
+        m = Manifest(
+            space="~thro",
+            parent="Home",
+            pages=[ManifestPage(title="Notes", file="notes.md")],
+        )
+        flat = resolve_page_tree(m)
+        assert len(flat) == 1
+        # space is not in FlatPage, but parent_title should be preserved
+        assert flat[0].parent_title == "Home"
+
+
 class TestPlanArtifact:
     def test_create_plan(self):
         plan = PlanArtifact(
