@@ -187,7 +187,10 @@ def page_inspect(
             if not space or not title:
                 raise validation_error(ERR_VALIDATION_REQUIRED, "Either --page-id or both --space and --title are required")
             page = client.get_page(space, title)
-        ctx.result = page if raw else _slim_page(page) if page else page
+        if not page:
+            from confpub.errors import ERR_VALIDATION_NOT_FOUND
+            raise ConfpubError(ERR_VALIDATION_NOT_FOUND, f"Page not found")
+        ctx.result = page if raw else _slim_page(page)
 
 
 @page_app.command("publish")
@@ -396,4 +399,14 @@ def guide(
 
 def run() -> None:
     """Entry point called by the `confpub` console script."""
-    app()
+    import sys
+    import click
+    from confpub.errors import ERR_VALIDATION_REQUIRED
+    try:
+        exit_code = app(standalone_mode=False)
+        sys.exit(exit_code or 0)
+    except click.UsageError as e:
+        err = ConfpubError(ERR_VALIDATION_REQUIRED, e.format_message())
+        envelope = Envelope.failure("cli", [err])
+        emit_stdout(envelope.to_json_bytes())
+        sys.exit(10)

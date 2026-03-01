@@ -91,7 +91,7 @@ class ConfluenceClient:
     def get_page_by_id(self, page_id: str) -> dict[str, Any]:
         """Get a page by its Confluence ID."""
         try:
-            return self._api.get_page_by_id(page_id, expand="version,body.storage")
+            return self._api.get_page_by_id(page_id, expand="version,body.storage,space")
         except Exception as exc:
             self._handle_error(exc, "get_page_by_id")
             return {}

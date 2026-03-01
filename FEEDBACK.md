@@ -1,118 +1,226 @@
-# confpub-cli v0.2.2 — Blind Test Feedback
+# confpub-cli v0.2.3 — Blind Test Feedback
 
-**Tester:** Claude Code (Opus 4.6), acting as an LLM agent
-**Date:** 2026-03-01
-**Method:** Zero-shot exploration starting from `uvx confpub-cli --help`, then progressively deeper testing of every subcommand, error path, and workflow.
+**Tester**: Claude Opus 4.6 (LLM agent)
+**Date**: 2026-03-01
+**Environment**: Windows 11, bash shell, `uvx confpub-cli`
+**Confluence**: Cloud instance (thomasklokrohde.atlassian.net)
 
 ---
 
 ## Overall Impression
 
-confpub is a **remarkably well-designed agent-first CLI**. The `guide` command as a single bootstrap entry point is a standout idea — I was able to learn the entire CLI schema, error codes, auth precedence, and concurrency rules in one call. The structured JSON envelope on stdout with progress on stderr is exactly right for machine consumption. This is one of the best-designed CLIs I've encountered for agent integration.
+confpub-cli is a remarkably well-designed agent-first CLI. As an LLM agent driving it
+zero-shot, I was productive within seconds. The `guide` command gave me everything I
+needed to understand the full command surface, error taxonomy, and concurrency rules.
+The consistent JSON envelope made it trivial to parse every response. This is one of
+the best-designed CLIs I've encountered for agent consumption.
 
-**Score: 8.5/10** — excellent foundation, a few rough edges to polish.
+**Rating: 4/5** — Excellent foundation with a handful of rough edges to polish.
 
 ---
 
 ## What Works Well
 
-### 1. The `guide` command is brilliant
-One call to `confpub guide` gave me everything: all commands with flags, mutation indicators, error codes with exit codes and retry hints, auth precedence, and concurrency rules. The `--section` filter is a nice touch. This is the gold standard for agent-discoverability.
+### Structured JSON Envelope
+Every command returns the same `{ ok, command, target, result, warnings, errors, metrics }`
+shape. Parsing is zero-effort. The `request_id` and `metrics.duration_ms` fields are a
+nice touch for tracing and diagnostics.
 
-### 2. Structured JSON envelope is consistent
-Every response — success or failure — follows the same shape: `schema_version`, `request_id`, `ok`, `command`, `target`, `result`, `warnings`, `errors`, `metrics`. I never had to guess the format. The `request_id` is useful for log correlation.
+### `guide` Command
+Brilliant bootstrapping mechanism. One call gives an agent: every command with its flags,
+mutability annotations, error codes with exit codes and retry hints, auth precedence,
+and concurrency rules. The `--section` flag is useful for targeted queries. This alone
+puts confpub ahead of most CLI tools for agent integration.
 
-### 3. Error codes are stable and actionable
-`ERR_IO_FILE_NOT_FOUND` with `retryable: true` and `suggested_action: "retry"` — that's exactly what an agent needs. The exit code bucketing (10=validation, 20=auth, 40=conflict, 50=IO, 90=internal) is clean. I could build a robust retry/escalation loop from just the `guide --section error_codes` output.
+### Transactional Plan Workflow
+The plan → validate → apply → verify pipeline is well thought out:
+- `plan create` generates a readable artifact with clear operation types
+- `plan validate` checks for drift before apply
+- `plan apply` supports `--dry-run` for preview
+- The lockfile (`confpub.lock`) enables idempotent re-publishing
 
-### 4. Transactional plan workflow
-The `plan create → validate → apply → verify` pipeline with fingerprint-based conflict detection is a strong design. Separating the plan artifact from execution lets an agent inspect and reason about changes before committing. The `--dry-run` flag on both `page publish` and `plan apply` is essential.
+I tested the full cycle and it worked flawlessly: manifest → plan → validate → dry-run → apply → verify.
 
-### 5. Safety annotations
-The `safety_flags` in the guide output (e.g., `--cascade: "Also deletes child pages"`) are a great signal for agents to ask for human confirmation before using dangerous flags.
+### Markdown Conversion
+Tested headings, bold/italic, inline code, fenced code blocks (with language), tables,
+admonitions (`[!NOTE]`, `[!WARNING]`, `[!TIP]`), strikethrough, and horizontal rules.
+All converted correctly to Confluence Storage Format. Particularly impressed that
+admonitions map to the proper Confluence Info/Warning/Tip macros.
 
-### 6. Auth precedence is well-thought-out
-CLI flags → env vars → config file → OS keychain, with `LLM=true` suppressing interactive prompts — exactly right.
+### Error Taxonomy
+Stable error codes (`ERR_*`) with structured details, exit codes, and `suggested_action`
+hints (`fix_input`, `retry`, `reauth`, `escalate`). An agent can branch on these without
+parsing human-readable messages. The `retryable` flag and `retry_after_ms` for I/O errors
+are agent-friendly.
 
-### 7. Mutation markers
-Every command in the guide is tagged with `mutates: true/false` and grouped (`read`, `write`, `transactional`). This makes it trivial for an agent to know which commands are safe to call speculatively.
+### Safety Design
+- Write commands are clearly annotated as `mutates: true` in the guide
+- `--dry-run` is available on both `page publish` and `plan apply`
+- `--cascade` is a separate opt-in for cascading deletes
+- `safety_flags` section in the guide calls out dangerous flags
+
+### Auth Resolution
+Clean precedence chain (flags → env vars → config file → keychain) with auto-detection
+of Cloud vs Server from the URL. `auth inspect` gives a quick status check.
 
 ---
 
-## Issues Found
+## Bugs Found
 
-### Bug: `--quiet` flag does not suppress stderr
+### BUG-1: `--space` flag ignored during page update (Severity: High)
 
-**Severity:** Medium
-**Steps:** Run `confpub-cli --quiet page publish page.md --space SD --parent "Software Development" --dry-run` and capture stderr.
-**Expected:** stderr should be empty (or at least suppress the "Can't find..." message).
-**Actual:** The message `Can't find 'Page' page on https://thomasklokrohde.atlassian.net/wiki` still appears on stderr, identical to the non-quiet run.
+When I published a page to space `SD`, then re-published with `--space NONEXIST`, the
+command succeeded (exit 0) and updated the existing page in the `SD` space. The `--space`
+flag was silently ignored on the update path.
 
-### Bug: `target.title` shows raw filename instead of resolved title
+**Repro:**
+```bash
+confpub page publish test.md --space SD --parent "Software Development"
+# Creates page in SD, version 1
 
-**Severity:** Low
-**Steps:** Run `page publish page.md --space SD --parent "..." --dry-run` (no `--title` flag).
-**Expected:** `target.title` should be `"Page"` (the resolved title).
-**Actual:** `target.title` is `"page.md"` (the raw filename), while the actual page title used in `result.changes` is `"Page"`. An agent parsing `target.title` would get the wrong value.
-
-### Bug: Nonexistent space returns `ERR_INTERNAL_SDK` (exit 90) instead of a specific error
-
-**Severity:** Medium
-**Steps:** Run `page inspect --space NONEXISTENT --title "nope"`.
-**Expected:** A specific error like `ERR_AUTH_FORBIDDEN` (exit 20) or a new `ERR_NOT_FOUND` code.
-**Actual:** Returns `ERR_INTERNAL_SDK` with exit code 90 and `suggested_action: "escalate"`. The message is `"Unexpected API error (get_page): The calling user does not have permission to view the content"`. This is misleading — it's not an internal error, it's a permissions/not-found issue. An agent following the `escalate` suggestion would file a bug report instead of trying a different space key.
-
-### Rough edge: `--verbose` flag has no visible effect
-
-**Severity:** Low
-**Steps:** Compare `auth inspect` output with and without `--verbose`.
-**Observation:** The JSON output is identical. No extra diagnostics field, no additional stderr output. Either verbose mode isn't implemented yet, or its effect is too subtle to observe.
-
-### Rough edge: `page.list` and `page.inspect` responses are extremely verbose
-
-**Severity:** Medium (for agent consumption)
-**Observation:** These commands return the raw Confluence API response including `_expandable`, `_links`, `macroRenderedOutput`, `profilePicture`, `accountType`, etc. A single `page.list` for 5 pages produced ~300 lines of JSON. For an agent working within a context window, this is wasteful. A slimmed-down response with just `id`, `title`, `version.number`, `version.when`, and `webui` link would be far more token-efficient. The full raw response could be available behind `--verbose` or a `--raw` flag.
-
-### Rough edge: Manifest validation error exposes raw Pydantic internals
-
-**Severity:** Low
-**Steps:** Submit a manifest missing `parent` and `pages.0.title`.
-**Actual message:**
+confpub page publish test.md --space NONEXIST --parent "Software Development"
+# Expected: error (space not found or page not found in that space)
+# Actual: ok=true, updated page in SD to version 3
 ```
-Invalid manifest: 2 validation errors for Manifest
-parent
-  Field required [type=missing, input_value={'space': 'SD', ...}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.12/v/missing
+
+**Impact**: An agent could accidentally update a page in the wrong space without any
+warning. The title-based lookup appears to match globally (or against the lockfile)
+rather than scoping to the specified space.
+
+### BUG-2: Nonexistent page returns `ok: true` with `result: null` (Severity: Medium)
+
+```bash
+confpub page inspect --space SD --title "nonexistent-page"
+# Returns: ok=true, result=null, errors=[]
 ```
-**Suggestion:** Wrap Pydantic errors into a cleaner `details` array, e.g.:
+
+This should return `ok: false` with an appropriate error (e.g., a new `ERR_NOT_FOUND`
+code). An agent checking `ok` to determine success would incorrectly think the call
+succeeded. Currently the only way to detect "not found" is to check if `result` is null,
+which is an undocumented convention.
+
+A `"Can't find ... page"` message also leaks to stderr, suggesting the underlying library
+knows it's not found — the CLI just doesn't surface it as a structured error.
+
+### BUG-3: Missing required options return exit code 2, not JSON envelope (Severity: Medium)
+
+```bash
+confpub page list
+# Returns Typer's error format: "Missing option '--space'." with exit code 2
+```
+
+This breaks the documented invariant: "stdout is exclusively JSON — one object, no
+preamble, no epilogue." An agent expecting to always parse JSON on stdout will crash.
+Exit code 2 is also undocumented (the error code table only covers 0/10/20/40/50/90).
+
+**Suggestion**: Catch Typer's `MissingParameter` and convert it to an
+`ERR_VALIDATION_REQUIRED` envelope with exit code 10.
+
+### BUG-4: `--backup` flag produces no observable output (Severity: Low)
+
+```bash
+confpub page publish test.md --space SD --parent "Software Development" --backup
+```
+
+The command succeeded but the result JSON contains no mention of a backup being created —
+no backup file path, no `backup: true` field, nothing. Either the backup didn't happen,
+or it happened silently. An agent has no way to confirm.
+
+### BUG-5: Nonexistent parent accepted in dry-run (Severity: Low)
+
+```bash
+confpub page publish test.md --space SD --parent "Nonexistent Parent" --dry-run
+# Returns: ok=true, type=page.update
+```
+
+Dry-run should ideally validate that the parent page exists, or at least emit a warning.
+Currently it plans an update to a nonexistent parent, which would fail on real apply.
+
+---
+
+## Improvement Suggestions
+
+### 1. Normalize attachment command output
+
+`attachment.list` and `attachment.upload` return raw Confluence API responses with
+internal fields (`_expandable`, ARIs, `base64EncodedAri`, full user profiles). Every
+other command returns a curated result. These should be normalized to the same level
+of curation.
+
+**Suggested `attachment.list` shape:**
 ```json
-"details": {
-  "missing_fields": ["parent", "pages[0].title"]
+{
+  "attachments": [
+    {
+      "id": "att262400",
+      "title": "test-attachment.txt",
+      "media_type": "application/binary",
+      "file_size": 27,
+      "download_url": "/download/attachments/360459/test-attachment.txt?..."
+    }
+  ]
 }
 ```
-The raw Pydantic output with `input_value`, `input_type`, and the pydantic.dev URL leaks implementation details.
 
----
+### 2. Add `--format` flag or page count to `page.list`
 
-## Suggestions
+For spaces with many pages, `page.list` returns everything. Consider:
+- A `--limit` / `--offset` for pagination
+- A `--format compact` option (just titles + IDs)
+- Include total count in the result
 
-### 1. Add a `--compact` or `--slim` output mode
-For agent use, return only the fields that matter. The full Confluence API payloads in `page.list` and `page.inspect` are 10x more data than an agent needs. This would significantly reduce token usage.
+### 3. Suppress `"Can't find ... page"` stderr noise
 
-### 2. Consider a `page.get-body` subcommand (or flag)
-`page.inspect` returns the full storage-format body inline, which is great for inspection but makes the response enormous. A `--no-body` flag on inspect (or a separate `page.body` command) would let agents choose when they need content vs. metadata.
+Multiple commands emit `"Can't find 'X' page on ..."` to stderr. This comes from the
+underlying `atlassian-python-api` library but leaks through even with `--quiet`. Since
+not finding a page is a normal flow (e.g., first publish), this shouldn't appear by
+default — maybe only with `--verbose`.
 
-### 3. Add `schema_version` to the manifest validation error
-When a manifest is missing `schema_version`, the error message mentions `parent` and `pages.0.title` but doesn't flag the missing `schema_version`. (Tested: a manifest without `schema_version` but with `parent` was accepted — so it appears optional. The README says it should be there. Clarify whether it's required.)
+### 4. Add stdin support
 
-### 4. The `config set` subcommand help is sparse
-`config set --help` doesn't show what keys are valid or their expected values. Adding a `config list-keys` or including examples in the help text would help.
+`echo "# Hello" | confpub page publish - --space SD --parent "Docs" --title "Hello"`
+would be useful for piped workflows and agent-generated content. Currently `-` is treated
+as a literal filename.
 
-### 5. Document the title-from-filename behavior
-The help text says `--title TEXT  Page title (defaults to filename)` but the actual behavior is "filename without extension, title-cased" (e.g., `test-confpub.md` → `Test Confpub`, `page.md` → `Page`). Document the transformation rule.
+### 5. `plan verify` with no assertions is a no-op
+
+```bash
+confpub plan verify --plan confpub-plan.json
+# Returns: all_passed=true, results=[]
+```
+
+Without `--assertions`, this always passes vacuously. Consider:
+- Auto-generating basic assertions from the plan (pages exist, correct parent, version incremented)
+- Emitting a warning when no assertions are provided
+
+### 6. Consider `--json` flag for Typer-level errors
+
+As a bridge until BUG-3 is fully fixed, a `--json` flag could force JSON output even
+for framework-level errors (missing options, unknown commands).
+
+### 7. Lockfile includes pages from `page publish` and `plan apply`
+
+The lockfile accumulated entries from both `page publish` (single-file mode) and
+`plan apply`. This might be intentional for idempotency, but it could surprise users
+who expected the lockfile to only track manifest-managed pages. Consider documenting
+this behavior or separating the two.
 
 ---
 
 ## Summary
 
-confpub nails the core agent-first design philosophy: structured output, stable error codes, a self-describing `guide` command, mutation markers, safety annotations, and a clean transactional workflow. The main areas for improvement are (1) trimming the verbose Confluence API payloads for agent-friendly output, (2) fixing the `--quiet` bug, and (3) better error classification for permission/not-found cases vs. true internal errors. This is a tool I'd be confident integrating into an autonomous agent workflow today.
+| Area | Score |
+|------|-------|
+| Agent discoverability (`guide`) | 5/5 |
+| JSON envelope consistency | 4/5 (BUG-3 breaks it for Typer errors) |
+| Error handling | 4/5 (BUG-2 masks not-found) |
+| Markdown conversion | 5/5 |
+| Plan workflow | 5/5 |
+| Write correctness | 3/5 (BUG-1 is a real data integrity risk) |
+| Output curation | 3/5 (attachments leak raw API) |
+| Documentation (README) | 5/5 |
+
+confpub is production-ready for the core read + plan + publish workflows. The main
+blocker is BUG-1 (space flag ignored on updates), which could cause silent cross-space
+writes. Fixing that plus normalizing the attachment output would bring this to a
+strong 5/5.

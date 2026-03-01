@@ -131,6 +131,7 @@ def apply_plan(
 
         elif page.operation == "update":
             before_version = None
+            backup_path = None
             if not dry_run and page.confluence_page_id:
                 # Backup if requested
                 if backup:
@@ -139,6 +140,9 @@ def apply_plan(
                     backup_file = plan_dir / f".confpub-backup-{page.confluence_page_id}.html"
                     body = existing.get("body", {}).get("storage", {}).get("value", "")
                     backup_file.write_text(body, encoding="utf-8")
+                    backup_path = str(backup_file)
+                else:
+                    backup_path = None
 
                 existing = client.get_page_by_id(page.confluence_page_id)
                 before_version = existing.get("version", {})
@@ -152,6 +156,8 @@ def apply_plan(
                 "before": {"version": before_version} if before_version else None,
                 "after": {},
             }
+            if not dry_run and backup_path:
+                change["backup_path"] = backup_path
 
             if not dry_run and page.confluence_page_id:
                 result = client.update_page(page.confluence_page_id, page.title, storage)

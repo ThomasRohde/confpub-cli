@@ -17,6 +17,7 @@ from confpub.converter import convert_markdown, fingerprint_content
 from confpub.errors import (
     ERR_IO_FILE_NOT_FOUND,
     ERR_VALIDATION_REQUIRED,
+    ERR_VALIDATION_SPACE_MISMATCH,
     ConfpubError,
 )
 from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, update_lockfile
@@ -74,6 +75,13 @@ def publish_page(
         existing_page_id = lockfile.pages[page_title].page_id
         page_data = client.get_page_by_id(existing_page_id)
         if page_data:
+            page_space = page_data.get("space", {}).get("key")
+            if page_space and page_space != space:
+                raise ConfpubError(
+                    ERR_VALIDATION_SPACE_MISMATCH,
+                    f"Page '{page_title}' exists in space '{page_space}', not '{space}'",
+                    details={"expected_space": space, "actual_space": page_space, "page_id": existing_page_id},
+                )
             version = page_data.get("version", {})
             current_version = version.get("number") if isinstance(version, dict) else version
     else:
@@ -98,13 +106,23 @@ def publish_page(
         }
         if assets:
             change["attachments_to_upload"] = [a.source_path for a in assets]
-        return {
+
+        warnings: list[str] = []
+        parent_page = client.get_page(space, parent)
+        if not parent_page:
+            warnings.append(f"Parent page '{parent}' not found in space '{space}' — publish will fail")
+
+        result_dict: dict[str, Any] = {
             "dry_run": True,
             "changes": [change],
             "summary": {operation: 1, "attachments_upload": len(assets)},
         }
+        if warnings:
+            result_dict["warnings"] = warnings
+        return result_dict
 
     # Real publish
+    backup_file_path: str | None = None
     if operation == "create":
         # Find parent page
         parent_page = client.get_page(space, parent)
@@ -122,6 +140,7 @@ def publish_page(
             body = existing_data.get("body", {}).get("storage", {}).get("value", "")
             backup_file = source_path.parent / f".confpub-backup-{existing_page_id}.html"
             backup_file.write_text(body, encoding="utf-8")
+            backup_file_path = str(backup_file)
 
         result = client.update_page(existing_page_id, page_title, storage)
         page_id = existing_page_id
@@ -149,6 +168,8 @@ def publish_page(
         "before": {"version": current_version} if current_version else None,
         "after": {"version": new_version, "page_id": page_id},
     }
+    if backup_file_path:
+        change["backup_path"] = backup_file_path
     if uploaded_attachments:
         change["attachments_added"] = uploaded_attachments
 
