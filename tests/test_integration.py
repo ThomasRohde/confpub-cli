@@ -163,6 +163,51 @@ class TestSearchCommand:
         assert "search" in result.output
 
 
+class TestQuietFlagPosition:
+    """Bug 1: --quiet and --verbose should work between group name and subcommand."""
+
+    def test_quiet_before_group(self):
+        result = runner.invoke(app, ["--quiet", "page", "--help"])
+        assert result.exit_code == 0
+
+    def test_quiet_between_group_and_command(self):
+        result = runner.invoke(app, ["page", "--quiet", "--help"])
+        assert result.exit_code == 0
+
+    def test_verbose_between_group_and_command(self):
+        result = runner.invoke(app, ["page", "--verbose", "--help"])
+        assert result.exit_code == 0
+
+    def test_quiet_on_plan_group(self):
+        result = runner.invoke(app, ["plan", "--quiet", "--help"])
+        assert result.exit_code == 0
+
+
+class TestDeleteCascadeResult:
+    """Bug 3: Delete result should include deleted_ids and deleted_count."""
+
+    def test_delete_result_has_deleted_ids(self, monkeypatch):
+        from confpub.confluence import ConfluenceClient
+
+        mock_client = ConfluenceClient.__new__(ConfluenceClient)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: mock_client)
+        monkeypatch.setattr(mock_client, "get_descendant_ids", lambda pid: ["child1", "child2"])
+        monkeypatch.setattr(mock_client, "_delete_descendants", lambda pid: None)
+        monkeypatch.setattr(mock_client, "delete_page", lambda pid: {"status": "deleted"})
+
+        # Prevent lockfile I/O
+        monkeypatch.setattr("confpub.lockfile.load_lockfile", lambda p: None)
+
+        result = runner.invoke(app, ["page", "delete", "--page-id", "123", "--cascade"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        assert "deleted_ids" in data["result"]
+        assert "deleted_count" in data["result"]
+        assert data["result"]["deleted_count"] == 3  # page + 2 children
+        assert sorted(data["result"]["deleted_ids"]) == ["123", "child1", "child2"]
+
+
 class TestEnvelopeContract:
     def test_guide_returns_full_envelope(self):
         result = runner.invoke(app, ["guide"])

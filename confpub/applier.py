@@ -195,4 +195,5 @@ def apply_plan(
         "changes": changes,
         "summary": counts,
         "lockfile_updated": not dry_run and len(changes) > 0,
+        "lockfile_path": str(lockfile_path) if not dry_run else None,
     }

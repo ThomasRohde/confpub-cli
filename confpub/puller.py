@@ -47,7 +47,7 @@ def _collect_tree(
     def _walk(pid: str, parent_id: str | None) -> None:
         children = client.get_page_children_deep(pid)
         if children:
-            emit_progress(0, 0, f"Found {len(children)} child page(s) under {pid}")
+            emit_progress(len(pages) + 1, 0, f"Found {len(children)} child page(s) under {pid}")
         for child in children:
             child_id = str(child["id"])
             pages.append({

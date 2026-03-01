@@ -22,12 +22,22 @@ from confpub.output import emit_stderr, emit_stdout, is_verbose, set_quiet, set_
 # Subcommand group apps
 # ---------------------------------------------------------------------------
 
-page_app = typer.Typer(help="Page operations")
-plan_app = typer.Typer(help="Transactional plan workflow")
-auth_app = typer.Typer(help="Authentication")
-config_app = typer.Typer(help="Configuration")
-space_app = typer.Typer(help="Space operations")
-attachment_app = typer.Typer(help="Attachment operations")
+
+def _group_callback(
+    quiet: bool = typer.Option(False, "--quiet", help="Suppress progress output on stderr"),
+    verbose: bool = typer.Option(False, "--verbose", help="Include diagnostics in result"),
+) -> None:
+    """Allow --quiet/--verbose between the group name and the subcommand."""
+    set_quiet(quiet)
+    set_verbose(verbose)
+
+
+page_app = typer.Typer(help="Page operations", callback=_group_callback)
+plan_app = typer.Typer(help="Transactional plan workflow", callback=_group_callback)
+auth_app = typer.Typer(help="Authentication", callback=_group_callback)
+config_app = typer.Typer(help="Configuration", callback=_group_callback)
+space_app = typer.Typer(help="Space operations", callback=_group_callback)
+attachment_app = typer.Typer(help="Attachment operations", callback=_group_callback)
 
 # ---------------------------------------------------------------------------
 # Main app
@@ -335,6 +345,9 @@ def page_delete(
         if lockfile and remove_by_page_ids(lockfile, deleted_ids, title=title if not page_id else None):
             save_lockfile(lockfile_path, lockfile)
 
+        # Enrich result with deleted ID summary
+        result["deleted_ids"] = sorted(deleted_ids)
+        result["deleted_count"] = len(deleted_ids)
         ctx.result = result
 
 

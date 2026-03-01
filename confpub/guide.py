@@ -66,7 +66,11 @@ def build_guide() -> dict[str, Any]:
                 "mutates": False,
                 "description": "Search Confluence content using CQL",
                 "flags": ["--cql", "--space", "--title", "--type", "--limit", "--start", "--include-archived", "--excerpt-length"],
-                "agent_hint": "Most agent workflows should include --type page to exclude attachments and space entities from results.",
+                "agent_hint": (
+                    "Most agent workflows should include --type page to exclude attachments and space entities from results. "
+                    "Use --start and --limit for pagination: first call with --start 0 --limit 25, "
+                    "then if has_more is true, call again with --start 25 --limit 25, and so on."
+                ),
                 "result_schema": {
                     "cql_query": "string — effective CQL sent to the API",
                     "results": "list of {id, type, title, excerpt, url, space_key, entity_type, status, last_modified, container_title}",
@@ -80,6 +84,7 @@ def build_guide() -> dict[str, Any]:
                     "confpub search --space DEV --type page --limit 10",
                     'confpub search --space DEV --cql \'title ~ "deploy"\'',
                     'confpub search --title "deploy guide" --space DEV',
+                    "confpub search --space DEV --type page --start 0 --limit 50",
                 ],
             },
             "page.list": {
@@ -92,13 +97,36 @@ def build_guide() -> dict[str, Any]:
                 "group": "read",
                 "mutates": False,
                 "description": "Inspect a Confluence page",
-                "flags": ["--space", "--title", "--page-id", "--format"],
+                "flags": ["--space", "--title", "--page-id", "--format", "--raw"],
+                "agent_hint": (
+                    "Use --format markdown to get the page body as Markdown instead of Confluence storage format. "
+                    "Use --raw for the full unprocessed API response (useful for debugging)."
+                ),
+                "result_schema": {
+                    "page_id": "string",
+                    "title": "string",
+                    "space_key": "string",
+                    "version": "int",
+                    "url": "string",
+                    "body_storage": "string (when --format storage, the default)",
+                    "body_markdown": "string (when --format markdown)",
+                },
+                "examples": [
+                    'confpub page inspect --space DEV --title "My Page"',
+                    "confpub page inspect --page-id 12345 --format markdown",
+                    "confpub page inspect --page-id 12345 --raw",
+                ],
             },
             "page.publish": {
                 "group": "write",
                 "mutates": True,
                 "description": "Publish a single Markdown file to Confluence",
                 "flags": ["--space", "--parent", "--title", "--page-id", "--dry-run", "--backup"],
+                "agent_hint": (
+                    "When --title is omitted, the title is inferred from the filename: "
+                    "the stem is extracted, hyphens and underscores are replaced with spaces, "
+                    "and the result is title-cased. E.g. 'my-cool-page.md' → 'My Cool Page'."
+                ),
             },
             "page.pull": {
                 "group": "read",
@@ -112,6 +140,11 @@ def build_guide() -> dict[str, Any]:
                 "safety_flags": {
                     "--force": "Overwrites existing local files without confirmation",
                 },
+                "agent_hint": (
+                    "During recursive pulls, NDJSON progress events are emitted on stderr "
+                    "with step (running discovery count) and total (0 until known). "
+                    "Use --quiet to suppress."
+                ),
             },
             "page.delete": {
                 "group": "write",
@@ -120,6 +153,10 @@ def build_guide() -> dict[str, Any]:
                 "flags": ["--space", "--title", "--page-id", "--cascade"],
                 "safety_flags": {
                     "--cascade": "Also deletes child pages",
+                },
+                "result_schema": {
+                    "deleted_ids": "list of string — sorted page IDs that were deleted",
+                    "deleted_count": "int — number of pages deleted (including children when --cascade)",
                 },
             },
             "space.list": {
@@ -167,6 +204,13 @@ def build_guide() -> dict[str, Any]:
                     ),
                     "--cascade": "Allows deletes that affect child pages",
                 },
+                "result_schema": {
+                    "dry_run": "bool",
+                    "changes": "list of change records",
+                    "summary": "{create: int, update: int, attachments_upload: int}",
+                    "lockfile_updated": "bool — true if lockfile was written",
+                    "lockfile_path": "string | null — absolute path to lockfile (null on dry-run)",
+                },
             },
             "plan.verify": {
                 "group": "transactional",
@@ -185,6 +229,16 @@ def build_guide() -> dict[str, Any]:
                 "mutates": True,
                 "description": "Set a configuration value",
                 "flags": [],
+                "args": ["KEY", "VALUE"],
+                "agent_hint": (
+                    "Valid keys: base_url, user, token. "
+                    "Values are persisted to the config file (~/.confpub/config.json)."
+                ),
+                "examples": [
+                    "confpub config set base_url https://mysite.atlassian.net/wiki",
+                    "confpub config set user alice@example.com",
+                    "confpub config set token ATATT...",
+                ],
             },
             "config.inspect": {
                 "group": "config",
@@ -215,6 +269,19 @@ def build_guide() -> dict[str, Any]:
             ERR_INTERNAL_CONVERTER: _error_code_entry(ERR_INTERNAL_CONVERTER),
             ERR_INTERNAL_REVERSE_CONVERTER: _error_code_entry(ERR_INTERNAL_REVERSE_CONVERTER),
             ERR_INTERNAL_SDK: _error_code_entry(ERR_INTERNAL_SDK),
+        },
+        "global_flags": {
+            "description": "Flags that can be placed at the top level or between group name and subcommand.",
+            "flags": {
+                "--quiet": "Suppress progress output on stderr",
+                "--verbose": "Include diagnostics in result",
+                "--version": "Show version and exit (top-level only)",
+            },
+            "placement": [
+                "confpub --quiet page publish ...  (before the group)",
+                "confpub page --quiet publish ...  (between group and command)",
+                "Both positions are equivalent; the flag is parsed by the group callback",
+            ],
         },
         "concurrency": {
             "rule": (
@@ -248,6 +315,11 @@ def build_guide() -> dict[str, Any]:
                 "Written atomically (temp file + rename) for crash safety",
                 "Used by plan.create to detect existing pages and versions",
                 "Does not prevent concurrent operations — purely local state tracking",
+                (
+                    "Path resolution: page.publish and page.delete use CWD/confpub.lock; "
+                    "page.pull uses <output-dir>/confpub.lock; "
+                    "plan.apply uses <plan-dir>/confpub.lock (same directory as the plan artifact)"
+                ),
             ],
         },
         "assertions": {

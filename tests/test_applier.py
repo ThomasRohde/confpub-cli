@@ -163,6 +163,27 @@ class TestApplyLockfileFingerprints:
         assert result["lockfile_updated"] is False
 
 
+class TestApplyLockfilePath:
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_lockfile_path_present_on_real_apply(self, MockClient, mock_config, plan_dir, mock_client):
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_dir / "plan.json"), dry_run=False)
+        assert result["lockfile_path"] is not None
+        assert "confpub.lock" in result["lockfile_path"]
+
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_lockfile_path_null_on_dry_run(self, MockClient, mock_config, plan_dir, mock_client):
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_dir / "plan.json"), dry_run=True)
+        assert result["lockfile_path"] is None
+
+
 class TestFingerprintCheck:
     @patch("confpub.applier.load_config")
     @patch("confpub.applier.ConfluenceClient")

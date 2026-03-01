@@ -112,3 +112,64 @@ class TestBuildGuide:
         assert "rule" in concurrency
         assert "safe_patterns" in concurrency
         assert len(concurrency["safe_patterns"]) > 0
+
+    def test_global_flags_section(self):
+        guide = build_guide()
+        assert "global_flags" in guide
+        gf = guide["global_flags"]
+        assert "--quiet" in gf["flags"]
+        assert "--verbose" in gf["flags"]
+        assert "placement" in gf
+        assert len(gf["placement"]) > 0
+
+    def test_page_inspect_has_raw_flag(self):
+        guide = build_guide()
+        cmd = guide["commands"]["page.inspect"]
+        assert "--raw" in cmd["flags"]
+        assert "result_schema" in cmd
+        assert "examples" in cmd
+        assert "agent_hint" in cmd
+
+    def test_page_publish_has_title_inference_hint(self):
+        guide = build_guide()
+        cmd = guide["commands"]["page.publish"]
+        assert "agent_hint" in cmd
+        assert "title-cased" in cmd["agent_hint"]
+
+    def test_page_pull_has_progress_hint(self):
+        guide = build_guide()
+        cmd = guide["commands"]["page.pull"]
+        assert "agent_hint" in cmd
+        assert "progress" in cmd["agent_hint"].lower()
+
+    def test_page_delete_has_result_schema(self):
+        guide = build_guide()
+        cmd = guide["commands"]["page.delete"]
+        assert "result_schema" in cmd
+        assert "deleted_ids" in cmd["result_schema"]
+        assert "deleted_count" in cmd["result_schema"]
+
+    def test_plan_apply_has_result_schema(self):
+        guide = build_guide()
+        cmd = guide["commands"]["plan.apply"]
+        assert "result_schema" in cmd
+        assert "lockfile_path" in cmd["result_schema"]
+
+    def test_config_set_has_args_and_examples(self):
+        guide = build_guide()
+        cmd = guide["commands"]["config.set"]
+        assert "args" in cmd
+        assert "agent_hint" in cmd
+        assert "examples" in cmd
+        assert len(cmd["examples"]) > 0
+
+    def test_search_has_pagination_example(self):
+        guide = build_guide()
+        cmd = guide["commands"]["search"]
+        assert any("--start" in ex for ex in cmd["examples"])
+        assert "pagination" in cmd["agent_hint"].lower()
+
+    def test_lockfile_path_resolution_documented(self):
+        guide = build_guide()
+        behaviors = guide["lockfile"]["behavior"]
+        assert any("Path resolution" in b for b in behaviors)
