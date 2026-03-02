@@ -208,6 +208,107 @@ class TestDeleteCascadeResult:
         assert sorted(data["result"]["deleted_ids"]) == ["123", "child1", "child2"]
 
 
+class TestLabelCommandHelp:
+    def test_label_help(self):
+        result = runner.invoke(app, ["label", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.output
+        assert "add" in result.output
+        assert "remove" in result.output
+
+    def test_label_list_help(self):
+        result = runner.invoke(app, ["label", "list", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+
+    def test_label_add_help(self):
+        result = runner.invoke(app, ["label", "add", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--label" in result.output
+
+    def test_label_remove_help(self):
+        result = runner.invoke(app, ["label", "remove", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--label" in result.output
+
+    def test_label_in_main_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "label" in result.output
+
+
+class TestCommentCommandHelp:
+    def test_comment_help(self):
+        result = runner.invoke(app, ["comment", "--help"])
+        assert result.exit_code == 0
+        assert "add" in result.output
+
+    def test_comment_add_help(self):
+        result = runner.invoke(app, ["comment", "add", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--text" in result.output
+        assert "--file" in result.output
+
+    def test_comment_in_main_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "comment" in result.output
+
+
+class TestPageMoveHelp:
+    def test_page_move_help(self):
+        result = runner.invoke(app, ["page", "move", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--target-parent" in result.output
+        assert "--space" in result.output
+        assert "--target-parent-id" in result.output
+
+    def test_page_move_in_page_help(self):
+        result = runner.invoke(app, ["page", "--help"])
+        assert result.exit_code == 0
+        assert "move" in result.output
+
+
+class TestPagePublishLabelFlag:
+    def test_publish_help_shows_label(self):
+        result = runner.invoke(app, ["page", "publish", "--help"])
+        assert result.exit_code == 0
+        assert "--label" in result.output
+
+
+class TestCommentValidation:
+    def test_comment_add_requires_text_or_file(self):
+        result = runner.invoke(app, ["comment", "add", "--page-id", "123"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+
+    def test_comment_add_rejects_both_text_and_file(self):
+        result = runner.invoke(app, ["comment", "add", "--page-id", "123", "--text", "hi", "--file", "f.md"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+
+
+class TestPageMoveValidation:
+    def test_move_requires_target(self):
+        result = runner.invoke(app, ["page", "move", "--page-id", "123"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+
+    def test_move_target_parent_requires_space(self):
+        result = runner.invoke(app, ["page", "move", "--page-id", "123", "--target-parent", "Root"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert "space" in data["errors"][0]["message"].lower()
+
+
 class TestEnvelopeContract:
     def test_guide_returns_full_envelope(self):
         result = runner.invoke(app, ["guide"])

@@ -420,6 +420,95 @@ class ConfluenceClient:
         }
 
     # ------------------------------------------------------------------
+    # Label operations
+    # ------------------------------------------------------------------
+
+    def get_labels(self, page_id: str) -> list[dict[str, Any]]:
+        """Get labels on a page."""
+        self._call_count += 1
+        try:
+            result = self._api.get_page_labels(page_id)
+            raw = result.get("results", []) if isinstance(result, dict) else (result if isinstance(result, list) else [])
+            return [_slim_label(lbl) for lbl in raw]
+        except Exception as exc:
+            self._handle_error(exc, "get_labels")
+            return []
+
+    def set_labels(self, page_id: str, labels: list[str]) -> list[dict[str, Any]]:
+        """Set labels on a page (additive — does not remove existing labels)."""
+        results: list[dict[str, Any]] = []
+        for lbl in labels:
+            self._call_count += 1
+            try:
+                result = self._api.set_page_label(page_id, lbl)
+                if isinstance(result, dict):
+                    results.append(_slim_label(result))
+                elif isinstance(result, list):
+                    results.extend(_slim_label(r) for r in result)
+            except Exception as exc:
+                self._handle_error(exc, "set_labels")
+        return results
+
+    def remove_label(self, page_id: str, label: str) -> dict[str, Any]:
+        """Remove a label from a page."""
+        self._call_count += 1
+        try:
+            self._api.remove_page_label(page_id, label)
+            return {"removed": True, "label": label, "page_id": page_id}
+        except Exception as exc:
+            self._handle_error(exc, "remove_label")
+            return {}
+
+    # ------------------------------------------------------------------
+    # Comment operations
+    # ------------------------------------------------------------------
+
+    def add_comment(self, page_id: str, body: str) -> dict[str, Any]:
+        """Add a comment to a page."""
+        self._call_count += 1
+        try:
+            result = self._api.add_comment(page_id, body)
+            return {
+                "id": result.get("id") if isinstance(result, dict) else None,
+                "page_id": page_id,
+                "created": True,
+            }
+        except Exception as exc:
+            self._handle_error(exc, "add_comment")
+            return {}
+
+    # ------------------------------------------------------------------
+    # Page move
+    # ------------------------------------------------------------------
+
+    def move_page(
+        self,
+        space_key: str,
+        page_id: str,
+        target_title: str | None = None,
+        target_id: str | None = None,
+        position: str = "append",
+    ) -> dict[str, Any]:
+        """Move a page under a new parent."""
+        self._call_count += 1
+        try:
+            result = self._api.move_page(
+                space_key, page_id,
+                target_title=target_title,
+                target_id=target_id,
+                position=position,
+            )
+            return {
+                "moved": True,
+                "page_id": page_id,
+                "target_parent": target_title or target_id,
+                "result": result if isinstance(result, dict) else {"raw": str(result)},
+            }
+        except Exception as exc:
+            self._handle_error(exc, "move_page")
+            return {}
+
+    # ------------------------------------------------------------------
     # Fingerprinting
     # ------------------------------------------------------------------
 
@@ -534,6 +623,15 @@ def _slim_attachment(att: dict[str, Any]) -> dict[str, Any]:
         if media_type and "media_type" not in result:
             result["media_type"] = media_type
     return result
+
+
+def _slim_label(lbl: dict[str, Any]) -> dict[str, Any]:
+    """Extract agent-relevant fields from a raw Confluence label object."""
+    return {
+        "name": lbl.get("name", ""),
+        "prefix": lbl.get("prefix", "global"),
+        "id": lbl.get("id"),
+    }
 
 
 def _slim_search_result(

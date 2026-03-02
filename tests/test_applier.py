@@ -184,6 +184,91 @@ class TestApplyLockfilePath:
         assert result["lockfile_path"] is None
 
 
+PLAN_WITH_LABELS = {
+    "schema_version": "1.0",
+    "created_at": "2026-02-28T14:30:00Z",
+    "space": "DEV",
+    "parent": "Root",
+    "pages": [
+        {
+            "id": "plan_1",
+            "title": "New Page",
+            "source_file": "new.md",
+            "confluence_page_id": None,
+            "current_fingerprint": None,
+            "operation": "create",
+            "attachments": [],
+            "labels": ["api", "docs"],
+        },
+        {
+            "id": "plan_2",
+            "title": "Existing Page",
+            "source_file": "existing.md",
+            "confluence_page_id": "456",
+            "current_fingerprint": "fp_abc",
+            "operation": "update",
+            "attachments": [],
+            "labels": ["updated"],
+        },
+    ],
+    "summary": {"create": 1, "update": 1, "noop": 0, "attachments_to_upload": 0, "labels_to_apply": 3},
+}
+
+
+class TestApplyLabels:
+    @pytest.fixture
+    def plan_dir_labels(self, tmp_path):
+        plan_file = tmp_path / "plan.json"
+        plan_file.write_text(json.dumps(PLAN_WITH_LABELS))
+        (tmp_path / "new.md").write_text("# New Page\n\nContent here.")
+        (tmp_path / "existing.md").write_text("# Existing Page\n\nUpdated content.")
+        return tmp_path
+
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_labels_applied_on_real_apply(self, MockClient, mock_config, plan_dir_labels, mock_client):
+        mock_client.set_labels.return_value = []
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_dir_labels / "plan.json"), dry_run=False)
+
+        assert mock_client.set_labels.call_count == 2
+        # Create page sets labels on new ID
+        mock_client.set_labels.assert_any_call("789", ["api", "docs"])
+        # Update page sets labels on existing ID
+        mock_client.set_labels.assert_any_call("456", ["updated"])
+        assert result["summary"]["labels_applied"] == 3
+
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_labels_in_change_records(self, MockClient, mock_config, plan_dir_labels, mock_client):
+        mock_client.set_labels.return_value = []
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_dir_labels / "plan.json"), dry_run=False)
+
+        create_change = result["changes"][0]
+        assert create_change["labels_added"] == ["api", "docs"]
+        update_change = result["changes"][1]
+        assert update_change["labels_added"] == ["updated"]
+
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_labels_dry_run_reports_but_no_apply(self, MockClient, mock_config, plan_dir_labels, mock_client):
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_dir_labels / "plan.json"), dry_run=True)
+
+        mock_client.set_labels.assert_not_called()
+        create_change = result["changes"][0]
+        assert create_change["labels_to_apply"] == ["api", "docs"]
+        update_change = result["changes"][1]
+        assert update_change["labels_to_apply"] == ["updated"]
+
+
 class TestFingerprintCheck:
     @patch("confpub.applier.load_config")
     @patch("confpub.applier.ConfluenceClient")

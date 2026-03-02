@@ -140,6 +140,82 @@ class TestPublishCreate:
         assert "Readme" in data["pages"]
 
 
+class TestPublishLabels:
+    @patch("confpub.publish.load_config")
+    @patch("confpub.publish.ConfluenceClient")
+    def test_labels_applied_on_create(self, MockClient, mock_config, source_dir, mock_client):
+        def get_page_side_effect(space, title):
+            if title == "Root":
+                return {"id": "root_1"}
+            return None
+        mock_client.get_page.side_effect = get_page_side_effect
+        mock_client.set_labels.return_value = []
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = publish_page(
+            file=str(source_dir / "readme.md"),
+            space="DEV",
+            parent="Root",
+            labels=["api", "docs"],
+        )
+
+        assert result["dry_run"] is False
+        mock_client.set_labels.assert_called_once_with("new_123", ["api", "docs"])
+        assert result["changes"][0]["labels_added"] == ["api", "docs"]
+
+    @patch("confpub.publish.load_config")
+    @patch("confpub.publish.ConfluenceClient")
+    def test_labels_reported_on_dry_run(self, MockClient, mock_config, source_dir, mock_client):
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = publish_page(
+            file=str(source_dir / "readme.md"),
+            space="DEV",
+            parent="Root",
+            dry_run=True,
+            labels=["api"],
+        )
+
+        assert result["dry_run"] is True
+        assert result["changes"][0]["labels_to_apply"] == ["api"]
+        mock_client.set_labels.assert_not_called()
+
+    @patch("confpub.publish.load_config")
+    @patch("confpub.publish.ConfluenceClient")
+    def test_labels_applied_on_noop(self, MockClient, mock_config, source_dir, mock_client):
+        """Labels should be applied even when content is unchanged (noop)."""
+        # Setup: page exists and fingerprint matches
+        mock_client.get_page.return_value = {"id": "existing_456", "version": {"number": 1}}
+        mock_client.fingerprint_page.return_value = None  # Force lockfile check
+        mock_client.set_labels.return_value = []
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        # Write lockfile with matching fingerprint
+        from confpub.converter import convert_markdown, fingerprint_content
+        md_text = (source_dir / "readme.md").read_text()
+        storage = convert_markdown(md_text)
+        fp = fingerprint_content(storage)
+
+        from confpub.lockfile import Lockfile, LockPageEntry, save_lockfile
+        lockfile = Lockfile()
+        lockfile.pages["Readme"] = LockPageEntry(page_id="existing_456", version=1, content_fingerprint=fp)
+        save_lockfile(source_dir / "confpub.lock", lockfile)
+
+        result = publish_page(
+            file=str(source_dir / "readme.md"),
+            space="DEV",
+            parent="Root",
+            labels=["tag1"],
+        )
+
+        assert result["changes"][0]["type"] == "page.noop"
+        mock_client.set_labels.assert_called_once_with("existing_456", ["tag1"])
+        assert result["changes"][0]["labels_added"] == ["tag1"]
+
+
 class TestPublishErrors:
     def test_missing_file(self):
         with pytest.raises(ConfpubError) as exc_info:

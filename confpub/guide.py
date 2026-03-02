@@ -24,6 +24,7 @@ from confpub.errors import (
     ERR_IO_FILE_NOT_FOUND,
     ERR_IO_TIMEOUT,
     ERR_VALIDATION_ASSET_MISSING,
+    ERR_VALIDATION_LABEL,
     ERR_VALIDATION_MANIFEST,
     ERR_VALIDATION_MARKDOWN,
     ERR_VALIDATION_NOT_FOUND,
@@ -121,11 +122,23 @@ def build_guide() -> dict[str, Any]:
                 "group": "write",
                 "mutates": True,
                 "description": "Publish a single Markdown file to Confluence",
-                "flags": ["--space", "--parent", "--title", "--page-id", "--dry-run", "--backup"],
+                "flags": ["--space", "--parent", "--title", "--page-id", "--dry-run", "--backup", "--label"],
                 "agent_hint": (
                     "When --title is omitted, the title is inferred from the filename: "
                     "the stem is extracted, hyphens and underscores are replaced with spaces, "
-                    "and the result is title-cased. E.g. 'my-cool-page.md' → 'My Cool Page'."
+                    "and the result is title-cased. E.g. 'my-cool-page.md' → 'My Cool Page'. "
+                    "Use --label to apply labels (repeatable): --label api --label docs."
+                ),
+            },
+            "page.move": {
+                "group": "write",
+                "mutates": True,
+                "description": "Move a page under a new parent",
+                "flags": ["--page-id", "--target-parent", "--space", "--target-parent-id"],
+                "agent_hint": (
+                    "Use --target-parent + --space for title-based targeting, "
+                    "or --target-parent-id for ID-based targeting. "
+                    "The page ID does not change after a move."
                 ),
             },
             "page.pull": {
@@ -176,6 +189,32 @@ def build_guide() -> dict[str, Any]:
                 "mutates": True,
                 "description": "Upload an attachment to a Confluence page",
                 "flags": ["--page-id"],
+            },
+            "label.list": {
+                "group": "read",
+                "mutates": False,
+                "description": "List labels on a Confluence page",
+                "flags": ["--page-id"],
+            },
+            "label.add": {
+                "group": "write",
+                "mutates": True,
+                "description": "Add labels to a Confluence page",
+                "flags": ["--page-id", "--label"],
+                "agent_hint": "Use --label for each label (repeatable): --label api --label docs. Labels must not contain spaces and max 255 characters.",
+            },
+            "label.remove": {
+                "group": "write",
+                "mutates": True,
+                "description": "Remove labels from a Confluence page",
+                "flags": ["--page-id", "--label"],
+            },
+            "comment.add": {
+                "group": "write",
+                "mutates": True,
+                "description": "Add a comment to a Confluence page",
+                "flags": ["--page-id", "--text", "--file"],
+                "agent_hint": "Exactly one of --text or --file is required. The body is converted from Markdown to Confluence storage format.",
             },
             "plan.create": {
                 "group": "transactional",
@@ -254,6 +293,7 @@ def build_guide() -> dict[str, Any]:
             ERR_VALIDATION_ASSET_MISSING: _error_code_entry(ERR_VALIDATION_ASSET_MISSING),
             ERR_VALIDATION_NOT_FOUND: _error_code_entry(ERR_VALIDATION_NOT_FOUND),
             ERR_VALIDATION_SPACE_MISMATCH: _error_code_entry(ERR_VALIDATION_SPACE_MISMATCH),
+            ERR_VALIDATION_LABEL: _error_code_entry(ERR_VALIDATION_LABEL),
             ERR_AUTH_REQUIRED: _error_code_entry(ERR_AUTH_REQUIRED),
             ERR_AUTH_EXPIRED: _error_code_entry(ERR_AUTH_EXPIRED),
             ERR_AUTH_FORBIDDEN: _error_code_entry(ERR_AUTH_FORBIDDEN),

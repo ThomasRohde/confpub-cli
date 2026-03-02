@@ -38,6 +38,8 @@ auth_app = typer.Typer(help="Authentication", callback=_group_callback)
 config_app = typer.Typer(help="Configuration", callback=_group_callback)
 space_app = typer.Typer(help="Space operations", callback=_group_callback)
 attachment_app = typer.Typer(help="Attachment operations", callback=_group_callback)
+label_app = typer.Typer(help="Label operations", callback=_group_callback)
+comment_app = typer.Typer(help="Comment operations", callback=_group_callback)
 
 # ---------------------------------------------------------------------------
 # Main app
@@ -55,6 +57,8 @@ app.add_typer(auth_app, name="auth")
 app.add_typer(config_app, name="config")
 app.add_typer(space_app, name="space")
 app.add_typer(attachment_app, name="attachment")
+app.add_typer(label_app, name="label")
+app.add_typer(comment_app, name="comment")
 
 
 def _version_callback(value: bool) -> None:
@@ -239,6 +243,7 @@ def page_publish(
     page_id: Optional[str] = typer.Option(None, "--page-id", help="Confluence page ID (skip lookup, update directly)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
     backup: bool = typer.Option(False, "--backup", help="Backup existing page before overwriting"),
+    label: Optional[list[str]] = typer.Option(None, "--label", help="Label to apply (repeatable)"),
 ) -> None:
     """Publish a single Markdown file to Confluence."""
     from confpub.publish import derive_title
@@ -262,6 +267,7 @@ def page_publish(
             dry_run=dry_run,
             backup=backup,
             progress_callback=ctx,
+            labels=label or [],
         )
         ctx.result = result
 
@@ -348,6 +354,43 @@ def page_delete(
         # Enrich result with deleted ID summary
         result["deleted_ids"] = sorted(deleted_ids)
         result["deleted_count"] = len(deleted_ids)
+        ctx.result = result
+
+
+@page_app.command("move")
+def page_move(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID to move"),
+    target_parent: Optional[str] = typer.Option(None, "--target-parent", help="Title of the new parent page"),
+    space: Optional[str] = typer.Option(None, "--space", help="Space key (required with --target-parent)"),
+    target_parent_id: Optional[str] = typer.Option(None, "--target-parent-id", help="Page ID of the new parent"),
+) -> None:
+    """Move a page under a new parent."""
+    target = {"page_id": page_id}
+    with command_context("page.move", target=target) as ctx:
+        if not target_parent and not target_parent_id:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "Either --target-parent or --target-parent-id is required",
+            )
+        if target_parent and not space:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "--space is required when using --target-parent",
+            )
+        from confpub.confluence import build_client
+        client = build_client()
+
+        if target_parent_id:
+            # Use target_id directly — more reliable, no title resolution needed
+            parent_page = client.get_page_by_id(target_parent_id)
+            if not parent_page or not parent_page.get("id"):
+                from confpub.errors import ERR_VALIDATION_NOT_FOUND
+                raise ConfpubError(ERR_VALIDATION_NOT_FOUND, f"Target parent page not found: {target_parent_id}")
+            resolved_space = parent_page.get("space", {}).get("key", space or "")
+            result = client.move_page(resolved_space, page_id, target_id=target_parent_id)
+        else:
+            result = client.move_page(space, page_id, target_title=target_parent)
+
         ctx.result = result
 
 
@@ -479,6 +522,111 @@ def config_inspect() -> None:
         from confpub.config import load_config
         config = load_config()
         ctx.result = config.to_display_dict()
+
+
+# ---------------------------------------------------------------------------
+# Label commands
+# ---------------------------------------------------------------------------
+
+
+@label_app.command("list")
+def label_list(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+) -> None:
+    """List labels on a Confluence page."""
+    with command_context("label.list", target={"page_id": page_id}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        labels = client.get_labels(page_id)
+        ctx.result = {"labels": labels, "count": len(labels)}
+
+
+@label_app.command("add")
+def label_add(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    label: list[str] = typer.Option(..., "--label", help="Label name (repeatable)"),
+) -> None:
+    """Add labels to a Confluence page."""
+    with command_context("label.add", target={"page_id": page_id}) as ctx:
+        from confpub.errors import ERR_VALIDATION_LABEL
+        # Validate labels
+        for lbl in label:
+            if " " in lbl:
+                raise ConfpubError(
+                    ERR_VALIDATION_LABEL,
+                    f"Label must not contain spaces: '{lbl}'",
+                    details={"label": lbl},
+                )
+            if len(lbl) > 255:
+                raise ConfpubError(
+                    ERR_VALIDATION_LABEL,
+                    f"Label exceeds 255 characters: '{lbl[:50]}...'",
+                    details={"label": lbl, "length": len(lbl)},
+                )
+
+        from confpub.confluence import build_client
+        client = build_client()
+        results = client.set_labels(page_id, label)
+        ctx.result = {"labels_added": label, "results": results}
+
+
+@label_app.command("remove")
+def label_remove(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    label: list[str] = typer.Option(..., "--label", help="Label name to remove (repeatable)"),
+) -> None:
+    """Remove labels from a Confluence page."""
+    with command_context("label.remove", target={"page_id": page_id}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        results = []
+        for lbl in label:
+            result = client.remove_label(page_id, lbl)
+            results.append(result)
+        ctx.result = {"labels_removed": label, "results": results}
+
+
+# ---------------------------------------------------------------------------
+# Comment commands
+# ---------------------------------------------------------------------------
+
+
+@comment_app.command("add")
+def comment_add(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    text: Optional[str] = typer.Option(None, "--text", help="Comment text (Markdown)"),
+    file: Optional[str] = typer.Option(None, "--file", help="Path to Markdown file for comment body"),
+) -> None:
+    """Add a comment to a Confluence page."""
+    with command_context("comment.add", target={"page_id": page_id}) as ctx:
+        if not text and not file:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "Either --text or --file is required",
+            )
+        if text and file:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "--text and --file are mutually exclusive",
+            )
+
+        if file:
+            from pathlib import Path
+            p = Path(file)
+            if not p.exists():
+                from confpub.errors import ERR_IO_FILE_NOT_FOUND
+                raise ConfpubError(ERR_IO_FILE_NOT_FOUND, f"File not found: {file}")
+            md_text = p.read_text(encoding="utf-8")
+        else:
+            md_text = text
+
+        from confpub.converter import convert_markdown
+        storage_body = convert_markdown(md_text)
+
+        from confpub.confluence import build_client
+        client = build_client()
+        result = client.add_comment(page_id, storage_body)
+        ctx.result = result
 
 
 # ---------------------------------------------------------------------------

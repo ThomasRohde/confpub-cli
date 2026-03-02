@@ -39,6 +39,7 @@ def publish_page(
     dry_run: bool = False,
     backup: bool = False,
     progress_callback: Any = None,
+    labels: list[str] | None = None,
 ) -> dict[str, Any]:
     """Publish a single Markdown file to Confluence.
 
@@ -129,6 +130,8 @@ def publish_page(
         }
         if assets:
             change["attachments_to_upload"] = [a.source_path for a in assets]
+        if labels:
+            change["labels_to_apply"] = labels
 
         warnings: list[str] = []
         parent_page = client.get_page(space, parent)
@@ -146,14 +149,19 @@ def publish_page(
 
     # Real publish
     if operation == "noop":
+        noop_change: dict[str, Any] = {
+            "type": "page.noop",
+            "title": page_title,
+            "confluence_page_id": existing_page_id,
+            "before": {"version": current_version} if current_version else None,
+        }
+        # Labels may still need applying even when content is unchanged
+        if labels and existing_page_id:
+            client.set_labels(existing_page_id, labels)
+            noop_change["labels_added"] = labels
         return {
             "dry_run": False,
-            "changes": [{
-                "type": "page.noop",
-                "title": page_title,
-                "confluence_page_id": existing_page_id,
-                "before": {"version": current_version} if current_version else None,
-            }],
+            "changes": [noop_change],
             "summary": {"noop": 1},
         }
 
@@ -192,6 +200,10 @@ def publish_page(
         client.update_page(page_id, page_title, storage)
         uploaded_attachments = [a.source_path for a in assets]
 
+    # Apply labels
+    if labels:
+        client.set_labels(page_id, labels)
+
     # Update lockfile
     new_version_int = new_version if isinstance(new_version, int) else 1
     update_lockfile(lockfile, page_title, page_id, new_version_int, content_fingerprint=local_fingerprint)
@@ -215,6 +227,8 @@ def publish_page(
         change["backup_path"] = backup_file_path
     if uploaded_attachments:
         change["attachments_added"] = uploaded_attachments
+    if labels:
+        change["labels_added"] = labels
 
     return {
         "dry_run": False,

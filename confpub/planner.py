@@ -58,7 +58,7 @@ def create_plan(
 
     # Build plan pages
     plan_pages: list[PlanPage] = []
-    counts = {"create": 0, "update": 0, "noop": 0, "attachments_to_upload": 0}
+    counts = {"create": 0, "update": 0, "noop": 0, "attachments_to_upload": 0, "labels_to_apply": 0}
 
     for i, fp in enumerate(flat_pages):
         plan_id = f"plan_{i + 1}"
@@ -118,6 +118,8 @@ def create_plan(
 
         counts[operation] += 1
         counts["attachments_to_upload"] += len(plan_attachments)
+        if fp.labels:
+            counts["labels_to_apply"] += len(fp.labels)
 
         plan_pages.append(PlanPage(
             id=plan_id,
@@ -128,6 +130,7 @@ def create_plan(
             operation=operation,
             parent_title=fp.parent_title,
             attachments=plan_attachments,
+            labels=fp.labels,
         ))
 
     # Build plan artifact

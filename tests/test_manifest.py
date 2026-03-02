@@ -170,6 +170,89 @@ class TestResolvePageTree:
         assert flat[0].assets == ["img/*.png"]
 
 
+class TestLabelMerging:
+    def test_global_labels_applied_to_all_pages(self):
+        m = Manifest(
+            space="DEV",
+            parent="Root",
+            labels=["global-tag"],
+            pages=[
+                ManifestPage(title="A", file="a.md"),
+                ManifestPage(title="B", file="b.md"),
+            ],
+        )
+        flat = resolve_page_tree(m)
+        assert flat[0].labels == ["global-tag"]
+        assert flat[1].labels == ["global-tag"]
+
+    def test_per_page_labels_merged_with_global(self):
+        m = Manifest(
+            space="DEV",
+            parent="Root",
+            labels=["global"],
+            pages=[
+                ManifestPage(title="A", file="a.md", labels=["page-specific"]),
+            ],
+        )
+        flat = resolve_page_tree(m)
+        assert flat[0].labels == ["global", "page-specific"]
+
+    def test_deduplication_preserves_order(self):
+        m = Manifest(
+            space="DEV",
+            parent="Root",
+            labels=["alpha", "beta"],
+            pages=[
+                ManifestPage(title="A", file="a.md", labels=["beta", "gamma"]),
+            ],
+        )
+        flat = resolve_page_tree(m)
+        assert flat[0].labels == ["alpha", "beta", "gamma"]
+
+    def test_no_labels_gives_empty_list(self):
+        m = Manifest(
+            space="DEV",
+            parent="Root",
+            pages=[ManifestPage(title="A", file="a.md")],
+        )
+        flat = resolve_page_tree(m)
+        assert flat[0].labels == []
+
+    def test_backward_compat_no_labels_field(self):
+        """Manifests without labels field should work (default empty list)."""
+        import yaml
+        data = yaml.safe_load("space: DEV\nparent: Root\npages:\n  - title: X\n    file: x.md\n")
+        m = Manifest(**data)
+        assert m.labels == []
+        flat = resolve_page_tree(m)
+        assert flat[0].labels == []
+
+
+class TestPlanPageLabels:
+    def test_plan_page_with_labels(self):
+        pp = PlanPage(
+            id="plan_1",
+            title="Test",
+            source_file="test.md",
+            operation="create",
+            labels=["api", "docs"],
+        )
+        assert pp.labels == ["api", "docs"]
+
+    def test_plan_page_default_empty_labels(self):
+        pp = PlanPage(
+            id="plan_1",
+            title="Test",
+            source_file="test.md",
+            operation="create",
+        )
+        assert pp.labels == []
+
+    def test_plan_summary_labels_to_apply(self):
+        ps = PlanSummary(create=1, labels_to_apply=3)
+        assert ps.labels_to_apply == 3
+
+
 class TestManifestValidationErrors:
     def test_pydantic_errors_are_clean(self, tmp_path):
         """Pydantic ValidationError should produce clean details, not raw internals."""

@@ -227,6 +227,105 @@ class TestDownloadAttachment:
         assert result is False
 
 
+class TestLabels:
+    def test_get_labels(self, client):
+        client._mock_api.get_page_labels.return_value = {
+            "results": [
+                {"name": "api", "prefix": "global", "id": "1"},
+                {"name": "docs", "prefix": "global", "id": "2"},
+            ]
+        }
+        labels = client.get_labels("123")
+        assert len(labels) == 2
+        assert labels[0]["name"] == "api"
+        assert labels[1]["name"] == "docs"
+        assert labels[0]["prefix"] == "global"
+
+    def test_get_labels_list_response(self, client):
+        """Some API versions return a list directly instead of {results: [...]}."""
+        client._mock_api.get_page_labels.return_value = [
+            {"name": "tag1", "prefix": "global", "id": "10"},
+        ]
+        labels = client.get_labels("123")
+        assert len(labels) == 1
+        assert labels[0]["name"] == "tag1"
+
+    def test_set_labels(self, client):
+        client._mock_api.set_page_label.return_value = {"name": "api", "prefix": "global", "id": "1"}
+        results = client.set_labels("123", ["api", "docs"])
+        assert client._mock_api.set_page_label.call_count == 2
+        assert len(results) == 2
+
+    def test_set_labels_call_count(self, client):
+        """Each label should increment _call_count."""
+        initial = client._call_count
+        client._mock_api.set_page_label.return_value = {"name": "x", "prefix": "global", "id": "1"}
+        client.set_labels("123", ["a", "b", "c"])
+        assert client._call_count == initial + 3
+
+    def test_remove_label(self, client):
+        client._mock_api.remove_page_label.return_value = None
+        result = client.remove_label("123", "old-tag")
+        assert result["removed"] is True
+        assert result["label"] == "old-tag"
+        client._mock_api.remove_page_label.assert_called_once_with("123", "old-tag")
+
+    def test_get_labels_error(self, client):
+        client._mock_api.get_page_labels.side_effect = Exception("401 Unauthorized")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.get_labels("123")
+        assert exc_info.value.code == ERR_AUTH_FORBIDDEN
+
+    def test_remove_label_error(self, client):
+        client._mock_api.remove_page_label.side_effect = Exception("404 Not Found")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.remove_label("123", "missing")
+        assert exc_info.value.code == ERR_VALIDATION_NOT_FOUND
+
+
+class TestComments:
+    def test_add_comment(self, client):
+        client._mock_api.add_comment.return_value = {"id": "comment_1"}
+        result = client.add_comment("123", "<p>Nice page!</p>")
+        assert result["created"] is True
+        assert result["id"] == "comment_1"
+        assert result["page_id"] == "123"
+        client._mock_api.add_comment.assert_called_once_with("123", "<p>Nice page!</p>")
+
+    def test_add_comment_error(self, client):
+        client._mock_api.add_comment.side_effect = Exception("403 Forbidden")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.add_comment("123", "<p>text</p>")
+        assert exc_info.value.code == ERR_AUTH_FORBIDDEN
+
+
+class TestMovePage:
+    def test_move_page_by_title(self, client):
+        client._mock_api.move_page.return_value = {"page": {"id": "123"}}
+        result = client.move_page("DEV", "123", target_title="New Parent")
+        assert result["moved"] is True
+        assert result["page_id"] == "123"
+        assert result["target_parent"] == "New Parent"
+        client._mock_api.move_page.assert_called_once_with(
+            "DEV", "123", target_title="New Parent", target_id=None, position="append",
+        )
+
+    def test_move_page_by_id(self, client):
+        client._mock_api.move_page.return_value = {"page": {"id": "123"}}
+        result = client.move_page("DEV", "123", target_id="456")
+        assert result["moved"] is True
+        assert result["target_parent"] == "456"
+        client._mock_api.move_page.assert_called_once_with(
+            "DEV", "123", target_title=None, target_id="456", position="append",
+        )
+
+    def test_move_page_not_found(self, client):
+        client._mock_api.move_page.side_effect = Exception("404 Not Found")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.move_page("DEV", "999", target_title="Missing")
+        assert exc_info.value.code == ERR_VALIDATION_NOT_FOUND
+
+
 class TestFingerprint:
     def test_fingerprint_page(self, client):
         client._mock_api.get_page_by_id.return_value = {

@@ -51,6 +51,7 @@ class ManifestPage(BaseModel):
     title: str
     file: str
     assets: list[str] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=list)
     children: list[ManifestPage] = Field(default_factory=list)
 
 
@@ -93,6 +94,7 @@ class PlanPage(BaseModel):
     operation: Literal["create", "update", "noop"]
     parent_title: Optional[str] = None
     attachments: list[PlanAttachment] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=list)
 
 
 class PlanSummary(BaseModel):
@@ -102,6 +104,7 @@ class PlanSummary(BaseModel):
     update: int = 0
     noop: int = 0
     attachments_to_upload: int = 0
+    labels_to_apply: int = 0
 
 
 class PlanArtifact(BaseModel):
@@ -126,6 +129,7 @@ class FlatPage(BaseModel):
     title: str
     file: str
     assets: list[str] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=list)  # merged global + per-page
     parent_title: str  # The parent page title (from manifest parent or parent page)
 
 
@@ -187,6 +191,9 @@ def generate_manifest_yaml(
         result = []
         for p in pages:
             entry: dict[str, Any] = {"title": p["title"], "file": p["file"]}
+            labels = p.get("labels", [])
+            if labels:
+                entry["labels"] = labels
             children = p.get("children", [])
             if children:
                 entry["children"] = _build_pages(children)
@@ -206,16 +213,20 @@ def resolve_page_tree(manifest: Manifest) -> list[FlatPage]:
     """Flatten the recursive page tree into a list with parent references.
 
     Pages are returned in tree order (parents before children) to ensure
-    correct creation order.
+    correct creation order. Labels are merged: global (manifest.labels)
+    first, then per-page, deduplicated while preserving order.
     """
     flat: list[FlatPage] = []
+    global_labels = manifest.labels
 
     def _walk(pages: list[ManifestPage], parent_title: str) -> None:
         for page in pages:
+            merged = list(dict.fromkeys(global_labels + page.labels))
             flat.append(FlatPage(
                 title=page.title,
                 file=page.file,
                 assets=page.assets,
+                labels=merged,
                 parent_title=parent_title,
             ))
             if page.children:

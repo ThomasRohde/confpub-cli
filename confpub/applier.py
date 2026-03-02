@@ -43,7 +43,7 @@ def apply_plan(
     lockfile = load_lockfile(lockfile_path) or Lockfile()
 
     changes: list[dict[str, Any]] = []
-    counts = {"create": 0, "update": 0, "attachments_upload": 0}
+    counts = {"create": 0, "update": 0, "attachments_upload": 0, "labels_applied": 0}
 
     # Resolve parent page IDs by title
     parent_ids: dict[str, str] = {}  # title → page_id
@@ -128,9 +128,19 @@ def apply_plan(
                     change["attachments_added"] = [a.source_path for a in assets]
                     counts["attachments_upload"] += len(assets)
 
+                # Apply labels
+                if page.labels:
+                    client.set_labels(new_id, page.labels)
+                    change["labels_added"] = page.labels
+                    counts["labels_applied"] += len(page.labels)
+
                 # Update lockfile and parent tracking
                 update_lockfile(lockfile, page.title, new_id, new_version if isinstance(new_version, int) else 1, content_fingerprint=fingerprint_content(storage))
                 parent_ids[page.title] = new_id
+            else:
+                # Dry-run: report labels
+                if page.labels:
+                    change["labels_to_apply"] = page.labels
 
             counts["create"] += 1
             changes.append(change)
@@ -184,12 +194,22 @@ def apply_plan(
                     change["attachments_added"] = [a.source_path for a in assets]
                     counts["attachments_upload"] += len(assets)
 
+                # Apply labels
+                if page.labels:
+                    client.set_labels(page.confluence_page_id, page.labels)
+                    change["labels_added"] = page.labels
+                    counts["labels_applied"] += len(page.labels)
+
                 update_lockfile(
                     lockfile, page.title, page.confluence_page_id,
                     new_version if isinstance(new_version, int) else 1,
                     content_fingerprint=fingerprint_content(storage),
                 )
                 parent_ids[page.title] = page.confluence_page_id
+            else:
+                # Dry-run: report labels
+                if page.labels:
+                    change["labels_to_apply"] = page.labels
 
             counts["update"] += 1
             changes.append(change)

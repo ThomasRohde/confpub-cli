@@ -13,9 +13,11 @@ class TestBuildGuide:
         guide = build_guide()
         expected_commands = [
             "guide", "search",
-            "page.list", "page.inspect", "page.publish", "page.delete",
+            "page.list", "page.inspect", "page.publish", "page.delete", "page.move",
             "space.list",
             "attachment.list", "attachment.upload",
+            "label.list", "label.add", "label.remove",
+            "comment.add",
             "plan.create", "plan.validate", "plan.apply", "plan.verify",
             "auth.inspect",
             "config.set", "config.inspect",
@@ -33,12 +35,12 @@ class TestBuildGuide:
 
     def test_write_commands_are_mutating(self):
         guide = build_guide()
-        for cmd_id in ("page.publish", "page.delete", "plan.apply", "config.set"):
+        for cmd_id in ("page.publish", "page.delete", "page.move", "plan.apply", "config.set", "label.add", "label.remove", "comment.add"):
             assert guide["commands"][cmd_id]["mutates"] is True
 
     def test_read_commands_are_not_mutating(self):
         guide = build_guide()
-        for cmd_id in ("search", "page.list", "page.inspect", "space.list", "plan.validate"):
+        for cmd_id in ("search", "page.list", "page.inspect", "space.list", "plan.validate", "label.list"):
             assert guide["commands"][cmd_id]["mutates"] is False
 
     def test_plan_apply_has_safety_flags(self):
@@ -66,6 +68,7 @@ class TestBuildGuide:
             "ERR_VALIDATION_REQUIRED", "ERR_VALIDATION_MANIFEST",
             "ERR_VALIDATION_MARKDOWN", "ERR_VALIDATION_ASSET_MISSING",
             "ERR_VALIDATION_NOT_FOUND", "ERR_VALIDATION_SPACE_MISMATCH",
+            "ERR_VALIDATION_LABEL",
             "ERR_AUTH_REQUIRED", "ERR_AUTH_EXPIRED", "ERR_AUTH_FORBIDDEN",
             "ERR_CONFLICT_FINGERPRINT", "ERR_CONFLICT_LOCK", "ERR_CONFLICT_PAGE_EXISTS",
             "ERR_IO_FILE_NOT_FOUND", "ERR_IO_CONNECTION", "ERR_IO_TIMEOUT",
@@ -173,3 +176,42 @@ class TestBuildGuide:
         guide = build_guide()
         behaviors = guide["lockfile"]["behavior"]
         assert any("Path resolution" in b for b in behaviors)
+
+    def test_label_commands_in_guide(self):
+        guide = build_guide()
+        assert "label.list" in guide["commands"]
+        assert "label.add" in guide["commands"]
+        assert "label.remove" in guide["commands"]
+        assert guide["commands"]["label.list"]["group"] == "read"
+        assert guide["commands"]["label.add"]["group"] == "write"
+        assert guide["commands"]["label.remove"]["group"] == "write"
+
+    def test_comment_add_in_guide(self):
+        guide = build_guide()
+        assert "comment.add" in guide["commands"]
+        cmd = guide["commands"]["comment.add"]
+        assert cmd["group"] == "write"
+        assert cmd["mutates"] is True
+        assert "--text" in cmd["flags"]
+        assert "--file" in cmd["flags"]
+
+    def test_page_move_in_guide(self):
+        guide = build_guide()
+        assert "page.move" in guide["commands"]
+        cmd = guide["commands"]["page.move"]
+        assert cmd["group"] == "write"
+        assert cmd["mutates"] is True
+        assert "--page-id" in cmd["flags"]
+        assert "--target-parent" in cmd["flags"]
+
+    def test_page_publish_has_label_flag(self):
+        guide = build_guide()
+        cmd = guide["commands"]["page.publish"]
+        assert "--label" in cmd["flags"]
+
+    def test_err_validation_label_in_guide(self):
+        guide = build_guide()
+        assert "ERR_VALIDATION_LABEL" in guide["error_codes"]
+        entry = guide["error_codes"]["ERR_VALIDATION_LABEL"]
+        assert entry["exit_code"] == 10
+        assert entry["retryable"] is False

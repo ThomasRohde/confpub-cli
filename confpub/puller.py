@@ -187,10 +187,12 @@ def _build_page_tree(
     file_paths: dict[str, str],
     root_page_id: str,
     output_dir: str = ".",
+    page_labels: dict[str, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build a hierarchical page tree for manifest generation."""
     id_to_entry: dict[str, dict[str, Any]] = {}
     children_map: dict[str | None, list[str]] = {}
+    labels_map = page_labels or {}
 
     for entry in pages:
         page = entry["page"]
@@ -198,11 +200,14 @@ def _build_page_tree(
         parent_id = str(entry["parent_id"]) if entry["parent_id"] else None
         file_path = file_paths.get(pid, "")
 
-        id_to_entry[pid] = {
+        node: dict[str, Any] = {
             "title": page.get("title", ""),
             "file": os.path.relpath(file_path, output_dir) if file_path else "",
             "children": [],
         }
+        if labels_map.get(pid):
+            node["labels"] = labels_map[pid]
+        id_to_entry[pid] = node
         children_map.setdefault(parent_id, []).append(pid)
 
     def _attach_children(parent_id: str) -> list[dict[str, Any]]:
@@ -300,12 +305,16 @@ def pull_pages(
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
         Path(out_path).write_text(result.markdown, encoding="utf-8")
 
+        # Fetch labels
+        page_labels = [lbl["name"] for lbl in client.get_labels(pid)]
+
         files_result.append({
             "page_id": pid,
             "title": page_title,
             "file": out_path,
             "version": version_num,
             "attachments_downloaded": attachments_downloaded,
+            "labels": page_labels,
         })
 
     # Generate manifest if requested or recursive with multiple pages
@@ -315,7 +324,11 @@ def pull_pages(
         # Determine the actual parent of the root page
         ancestors = client.get_page_ancestors(root_id)
         manifest_parent = ancestors[-1].get("title", root_title) if ancestors else root_title
-        page_tree = _build_page_tree(all_pages, file_paths, root_id, output_dir)
+        # Collect labels by page ID for manifest generation
+        pulled_labels: dict[str, list[str]] = {
+            f["page_id"]: f.get("labels", []) for f in files_result
+        }
+        page_tree = _build_page_tree(all_pages, file_paths, root_id, output_dir, page_labels=pulled_labels)
         manifest_yaml = generate_manifest_yaml(root_space, manifest_parent, page_tree)
         manifest_path = os.path.join(output_dir, "confpub.yaml")
         Path(manifest_path).write_text(manifest_yaml, encoding="utf-8")
