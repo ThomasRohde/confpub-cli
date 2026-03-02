@@ -16,7 +16,7 @@ import typer
 from confpub import __version__
 from confpub.envelope import Envelope
 from confpub.errors import ConfpubError, exit_code_for, ERR_INTERNAL_SDK
-from confpub.output import emit_stderr, emit_stdout, is_verbose, set_quiet, set_verbose
+from confpub.output import emit_stderr, emit_stdout, is_compact, is_verbose, set_compact, set_quiet, set_verbose
 
 # ---------------------------------------------------------------------------
 # Subcommand group apps
@@ -26,10 +26,12 @@ from confpub.output import emit_stderr, emit_stdout, is_verbose, set_quiet, set_
 def _group_callback(
     quiet: bool = typer.Option(False, "--quiet", help="Suppress progress output on stderr"),
     verbose: bool = typer.Option(False, "--verbose", help="Include diagnostics in result"),
+    compact: bool = typer.Option(False, "--compact", help="Output single-line JSON (no indentation)"),
 ) -> None:
-    """Allow --quiet/--verbose between the group name and the subcommand."""
+    """Allow --quiet/--verbose/--compact between the group name and the subcommand."""
     set_quiet(quiet)
     set_verbose(verbose)
+    set_compact(compact)
 
 
 page_app = typer.Typer(help="Page operations", callback=_group_callback)
@@ -71,6 +73,7 @@ def _version_callback(value: bool) -> None:
 def main_callback(
     quiet: bool = typer.Option(False, "--quiet", help="Suppress progress output on stderr"),
     verbose: bool = typer.Option(False, "--verbose", help="Include diagnostics in result"),
+    compact: bool = typer.Option(False, "--compact", help="Output single-line JSON (no indentation)"),
     version: bool = typer.Option(
         False, "--version", help="Show version and exit",
         callback=_version_callback, is_eager=True,
@@ -79,6 +82,7 @@ def main_callback(
     """confpub — publish Markdown to Confluence."""
     set_quiet(quiet)
     set_verbose(verbose)
+    set_compact(compact)
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +98,7 @@ class CommandResult:
         self.target: dict[str, Any] | None = None
         self.warnings: list[str] = []
         self.metrics: dict[str, Any] = {}
+        self.client: Any = None
 
 
 @contextmanager
@@ -117,7 +122,10 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
         ctx.metrics["duration_ms"] = duration_ms
         if is_verbose():
             import traceback as tb
-            ctx.metrics["diagnostics"] = {"traceback": tb.format_exc()}
+            err_diag: dict[str, Any] = {"traceback": tb.format_exc()}
+            if ctx.client and hasattr(ctx.client, "_call_count"):
+                err_diag["api_call_count"] = ctx.client._call_count
+            ctx.metrics["diagnostics"] = err_diag
         envelope = Envelope.failure(
             command_name,
             [e],
@@ -125,7 +133,7 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
             warnings=ctx.warnings,
             metrics=ctx.metrics,
         )
-        emit_stdout(envelope.to_json_bytes())
+        emit_stdout(envelope.to_json_bytes(indent=not is_compact()))
         raise typer.Exit(code=exit_code_for(e.code))
     except typer.Exit:
         raise
@@ -145,7 +153,7 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
             warnings=ctx.warnings,
             metrics=ctx.metrics,
         )
-        emit_stdout(envelope.to_json_bytes())
+        emit_stdout(envelope.to_json_bytes(indent=not is_compact()))
         raise typer.Exit(code=90)
     else:
         duration_ms = int((time.monotonic() - start) * 1000)
@@ -155,15 +163,20 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
             from confpub.config import load_config as _load_verbose_config
 
             diag: dict[str, Any] = {
+                "duration_ms": duration_ms,
                 "command": command_name,
                 "target": ctx.target,
                 "warning_count": len(ctx.warnings),
                 "python_version": sys.version,
                 "confpub_version": __version__,
             }
+            if ctx.client and hasattr(ctx.client, "_call_count"):
+                diag["api_call_count"] = ctx.client._call_count
             try:
                 _vcfg = _load_verbose_config()
+                diag["config_source"] = _vcfg.token_source
                 diag["confluence_url"] = _vcfg.base_url
+                diag["is_cloud"] = _vcfg.is_cloud
             except Exception:
                 pass
             ctx.metrics["diagnostics"] = diag
@@ -174,7 +187,7 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
             warnings=ctx.warnings,
             metrics=ctx.metrics,
         )
-        emit_stdout(envelope.to_json_bytes())
+        emit_stdout(envelope.to_json_bytes(indent=not is_compact()))
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +205,15 @@ def page_list(
     with command_context("page.list", target={"space": space}) as ctx:
         from confpub.confluence import build_client, _slim_page
         client = build_client()
-        pages = client.list_pages(space, start=start, limit=limit)
-        ctx.result = {"pages": [_slim_page(p, base_url=client._config.base_url.rstrip("/"), is_cloud=client._config.is_cloud) for p in pages]}
+        ctx.client = client
+        page_result = client.list_pages(space, start=start, limit=limit)
+        ctx.result = {
+            "pages": [_slim_page(p, base_url=client._config.base_url.rstrip("/"), is_cloud=client._config.is_cloud) for p in page_result["pages"]],
+            "start": page_result["start"],
+            "limit": page_result["limit"],
+            "size": page_result["size"],
+            "has_more": page_result["has_more"],
+        }
 
 
 @page_app.command("inspect")
@@ -208,6 +228,7 @@ def page_inspect(
     with command_context("page.inspect", target={"space": space, "title": title, "page_id": page_id}) as ctx:
         from confpub.confluence import build_client, _slim_page
         client = build_client()
+        ctx.client = client
         if page_id:
             page = client.get_page_by_id(page_id)
         else:
@@ -240,6 +261,7 @@ def page_publish(
     space: str = typer.Option(..., "--space", help="Confluence space key"),
     parent: Optional[str] = typer.Option(None, "--parent", help="Parent page title"),
     title: Optional[str] = typer.Option(None, "--title", help="Page title (defaults to filename stem, hyphen/underscore→spaces, title-cased)"),
+    title_from_h1: bool = typer.Option(False, "--title-from-h1", help="Derive title from first H1 heading in the Markdown file"),
     page_id: Optional[str] = typer.Option(None, "--page-id", help="Confluence page ID (skip lookup, update directly)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
     backup: bool = typer.Option(False, "--backup", help="Backup existing page before overwriting"),
@@ -247,7 +269,7 @@ def page_publish(
 ) -> None:
     """Publish a single Markdown file to Confluence."""
     from confpub.publish import derive_title
-    resolved_title = derive_title(file, title)
+    resolved_title = derive_title(file, title, title_from_h1=title_from_h1)
     target = {"space": space, "title": resolved_title, "file": file}
     if page_id:
         target["page_id"] = page_id
@@ -325,6 +347,7 @@ def page_delete(
             )
         from confpub.confluence import build_client
         client = build_client()
+        ctx.client = client
 
         # Collect descendant IDs before deleting (for lockfile cleanup)
         deleted_ids: set[str] = set()
@@ -379,6 +402,7 @@ def page_move(
             )
         from confpub.confluence import build_client
         client = build_client()
+        ctx.client = client
 
         if target_parent_id:
             # Use target_id directly — more reliable, no title resolution needed
@@ -400,6 +424,7 @@ def space_list() -> None:
     with command_context("space.list") as ctx:
         from confpub.confluence import build_client
         client = build_client()
+        ctx.client = client
         spaces = client.list_spaces()
         ctx.result = {"spaces": spaces}
 
@@ -412,6 +437,7 @@ def attachment_list(
     with command_context("attachment.list", target={"page_id": page_id}) as ctx:
         from confpub.confluence import build_client, _slim_attachment
         client = build_client()
+        ctx.client = client
         attachments = client.get_attachments(page_id)
         ctx.result = {"attachments": [_slim_attachment(a) for a in attachments]}
 
@@ -425,6 +451,7 @@ def attachment_upload(
     with command_context("attachment.upload", target={"page_id": page_id, "file": file}) as ctx:
         from confpub.confluence import build_client
         client = build_client()
+        ctx.client = client
         result = client.upload_attachment(page_id, file)
         ctx.result = result
 
@@ -537,6 +564,7 @@ def label_list(
     with command_context("label.list", target={"page_id": page_id}) as ctx:
         from confpub.confluence import build_client
         client = build_client()
+        ctx.client = client
         labels = client.get_labels(page_id)
         ctx.result = {"labels": labels, "count": len(labels)}
 
@@ -566,6 +594,7 @@ def label_add(
 
         from confpub.confluence import build_client
         client = build_client()
+        ctx.client = client
         results = client.set_labels(page_id, label)
         ctx.result = {"labels_added": label, "results": results}
 
@@ -579,6 +608,7 @@ def label_remove(
     with command_context("label.remove", target={"page_id": page_id}) as ctx:
         from confpub.confluence import build_client
         client = build_client()
+        ctx.client = client
         results = []
         for lbl in label:
             result = client.remove_label(page_id, lbl)
@@ -625,6 +655,7 @@ def comment_add(
 
         from confpub.confluence import build_client
         client = build_client()
+        ctx.client = client
         result = client.add_comment(page_id, storage_body)
         ctx.result = result
 
@@ -669,6 +700,7 @@ def search(
 
         from confpub.confluence import build_client
         client = build_client()
+        ctx.client = client
         result = client.search(
             effective_cql,
             start=start,

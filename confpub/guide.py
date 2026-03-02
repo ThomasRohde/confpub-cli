@@ -93,6 +93,17 @@ def build_guide() -> dict[str, Any]:
                 "mutates": False,
                 "description": "List pages in a Confluence space",
                 "flags": ["--space", "--limit", "--start"],
+                "result_schema": {
+                    "pages": "list of slim page objects",
+                    "start": "int — current offset",
+                    "limit": "int — page size",
+                    "size": "int — number of pages returned in this batch",
+                    "has_more": "bool — true if more pages may be available (heuristic: size >= limit)",
+                },
+                "agent_hint": (
+                    "Use --start and --limit for pagination: first call with --start 0 --limit 25, "
+                    "then if has_more is true, call again with --start 25 --limit 25, and so on."
+                ),
             },
             "page.inspect": {
                 "group": "read",
@@ -122,11 +133,13 @@ def build_guide() -> dict[str, Any]:
                 "group": "write",
                 "mutates": True,
                 "description": "Publish a single Markdown file to Confluence",
-                "flags": ["--space", "--parent", "--title", "--page-id", "--dry-run", "--backup", "--label"],
+                "flags": ["--space", "--parent", "--title", "--title-from-h1", "--page-id", "--dry-run", "--backup", "--label"],
                 "agent_hint": (
+                    "Title precedence: explicit --title > --title-from-h1 (first H1 heading) > filename inference. "
                     "When --title is omitted, the title is inferred from the filename: "
                     "the stem is extracted, hyphens and underscores are replaced with spaces, "
                     "and the result is title-cased. E.g. 'my-cool-page.md' → 'My Cool Page'. "
+                    "Use --title-from-h1 to extract the title from the first # heading in the file. "
                     "Use --label to apply labels (repeatable): --label api --label docs."
                 ),
             },
@@ -315,6 +328,7 @@ def build_guide() -> dict[str, Any]:
             "flags": {
                 "--quiet": "Suppress progress output on stderr",
                 "--verbose": "Include diagnostics in result",
+                "--compact": "Output single-line JSON (no indentation)",
                 "--version": "Show version and exit (top-level only)",
             },
             "placement": [

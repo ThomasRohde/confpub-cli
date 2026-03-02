@@ -112,7 +112,7 @@ class TestPersonalSpaceKeyCLI:
 
         def fake_list_pages(self, space, **kwargs):
             captured["space"] = space
-            return []
+            return {"pages": [], "start": 0, "limit": 25, "size": 0, "has_more": False}
 
         from confpub.confluence import ConfluenceClient
         monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
@@ -307,6 +307,132 @@ class TestPageMoveValidation:
         data = json.loads(result.output)
         assert data["ok"] is False
         assert "space" in data["errors"][0]["message"].lower()
+
+
+class TestCompactFlag:
+    """Suggestion 4: --compact should produce single-line JSON output."""
+
+    def test_compact_produces_single_line(self):
+        result = runner.invoke(app, ["--compact", "guide"])
+        assert result.exit_code == 0
+        # Compact output should be a single line (no newlines within the JSON)
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 1
+        data = json.loads(lines[0])
+        assert data["ok"] is True
+
+    def test_compact_between_group_and_command(self, monkeypatch):
+        """--compact should work between group name and subcommand."""
+        def fake_list_pages(self, space, **kwargs):
+            return {"pages": [], "start": 0, "limit": 25, "size": 0, "has_more": False}
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+
+        result = runner.invoke(app, ["page", "--compact", "list", "--space", "DEV"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 1
+
+    def test_without_compact_is_multiline(self):
+        result = runner.invoke(app, ["guide"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) > 1
+
+
+class TestVerboseDiagnostics:
+    """Bug 6: --verbose should include rich diagnostics."""
+
+    def test_verbose_includes_diagnostics(self):
+        result = runner.invoke(app, ["--verbose", "guide"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "diagnostics" in data["metrics"]
+        diag = data["metrics"]["diagnostics"]
+        assert "duration_ms" in diag
+        assert "confpub_version" in diag
+        assert "command" in diag
+
+    def test_verbose_with_client_includes_api_call_count(self, monkeypatch):
+        """When a client is used, diagnostics should include api_call_count."""
+        def fake_list_pages(self, space, **kwargs):
+            self._call_count += 1
+            return {"pages": [], "start": 0, "limit": 25, "size": 0, "has_more": False}
+
+        from confpub.confluence import ConfluenceClient
+        from confpub.config import ResolvedConfig
+        from unittest.mock import patch, MagicMock
+
+        mock_config = ResolvedConfig(
+            base_url="https://test.atlassian.net/wiki",
+            user="user@test.com",
+            token="test_token",
+            token_source="env_var",
+        )
+
+        with patch("confpub.confluence.ConfluenceClient._build_api") as mock_build:
+            mock_build.return_value = MagicMock()
+            real_client = ConfluenceClient(mock_config)
+
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: real_client)
+
+        result = runner.invoke(app, ["page", "--verbose", "list", "--space", "DEV"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "diagnostics" in data["metrics"]
+        diag = data["metrics"]["diagnostics"]
+        assert "api_call_count" in diag
+        assert diag["api_call_count"] >= 1
+
+
+class TestPageListPagination:
+    """Suggestion 1: page.list should return pagination metadata."""
+
+    def test_page_list_has_pagination_fields(self, monkeypatch):
+        def fake_list_pages(self, space, **kwargs):
+            return {
+                "pages": [{"id": "1", "title": "P1"}],
+                "start": 0, "limit": 25, "size": 1, "has_more": False,
+            }
+
+        from confpub.confluence import ConfluenceClient
+        from confpub.config import ResolvedConfig
+        from unittest.mock import patch, MagicMock
+
+        mock_config = ResolvedConfig(
+            base_url="https://test.atlassian.net/wiki",
+            user="user@test.com",
+            token="test_token",
+            token_source="env_var",
+        )
+        with patch("confpub.confluence.ConfluenceClient._build_api") as mock_build:
+            mock_build.return_value = MagicMock()
+            real_client = ConfluenceClient(mock_config)
+
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: real_client)
+
+        result = runner.invoke(app, ["page", "list", "--space", "DEV"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        r = data["result"]
+        assert "pages" in r
+        assert "start" in r
+        assert "limit" in r
+        assert "size" in r
+        assert "has_more" in r
+
+
+class TestTitleFromH1Flag:
+    """Suggestion 2: --title-from-h1 flag should be available on page publish."""
+
+    def test_title_from_h1_in_help(self):
+        result = runner.invoke(app, ["page", "publish", "--help"])
+        assert result.exit_code == 0
+        assert "--title-from-h1" in result.output
 
 
 class TestEnvelopeContract:

@@ -8,9 +8,11 @@ from confpub.output import (
     emit_stderr,
     emit_stdout,
     is_ci,
+    is_compact,
     is_llm_mode,
     is_quiet,
     is_verbose,
+    set_compact,
     set_quiet,
     set_verbose,
 )
@@ -97,3 +99,17 @@ class TestEmitStderr:
         captured = capsys.readouterr()
         assert captured.err == ""
         set_quiet(None)  # type: ignore[arg-type]
+
+
+class TestCompactMode:
+    """Suggestion 4: compact mode plumbing."""
+
+    def test_set_compact(self):
+        set_compact(True)
+        assert is_compact() is True
+        set_compact(False)
+        assert is_compact() is False
+
+    def test_default_is_not_compact(self):
+        set_compact(False)
+        assert is_compact() is False

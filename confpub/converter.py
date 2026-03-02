@@ -366,6 +366,27 @@ def convert_markdown(md_text: str) -> str:
     return renderer.render(tokens, {}, {})
 
 
+def extract_h1_title(md_text: str) -> str | None:
+    """Extract the text of the first H1 heading from Markdown source.
+
+    Returns the title string, or None if no H1 is found.
+    """
+    parser = _create_parser()
+    tokens = parser.parse(md_text)
+    for i, token in enumerate(tokens):
+        if token.type == "heading_open" and token.tag == "h1":
+            # The next token should be an inline token with the heading content
+            if i + 1 < len(tokens) and tokens[i + 1].type == "inline":
+                inline = tokens[i + 1]
+                if inline.children:
+                    parts: list[str] = []
+                    for child in inline.children:
+                        if child.type in ("text", "code_inline"):
+                            parts.append(child.content)
+                    return "".join(parts) if parts else None
+    return None
+
+
 def fingerprint_content(content: str) -> str:
     """Return SHA-256 hex digest of content."""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()

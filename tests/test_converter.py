@@ -1,6 +1,6 @@
 """Tests for confpub.converter module."""
 
-from confpub.converter import convert_markdown, fingerprint_content
+from confpub.converter import convert_markdown, extract_h1_title, fingerprint_content
 
 
 class TestHeadings:
@@ -220,3 +220,31 @@ def hello():
         assert "<blockquote>" in result
         assert "<hr />" in result
         assert '<a href="https://example.com">' in result
+
+
+class TestExtractH1Title:
+    """Suggestion 2: extract_h1_title should extract text from first H1 heading."""
+
+    def test_simple_h1(self):
+        assert extract_h1_title("# My Page Title") == "My Page Title"
+
+    def test_h1_with_body(self):
+        md = "# Getting Started\n\nSome content here."
+        assert extract_h1_title(md) == "Getting Started"
+
+    def test_no_h1_returns_none(self):
+        assert extract_h1_title("## Only H2\n\nNo H1 here.") is None
+
+    def test_empty_returns_none(self):
+        assert extract_h1_title("") is None
+
+    def test_h1_with_inline_code(self):
+        assert extract_h1_title("# Using `confpub` CLI") == "Using confpub CLI"
+
+    def test_first_h1_wins(self):
+        md = "# First Title\n\n## Sub\n\n# Second Title"
+        assert extract_h1_title(md) == "First Title"
+
+    def test_h2_before_h1(self):
+        md = "## Intro\n\n# Main Title"
+        assert extract_h1_title(md) == "Main Title"

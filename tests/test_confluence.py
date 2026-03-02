@@ -135,8 +135,37 @@ class TestListPages:
             {"id": "1", "title": "Page A"},
             {"id": "2", "title": "Page B"},
         ]
-        pages = client.list_pages("DEV")
-        assert len(pages) == 2
+        result = client.list_pages("DEV")
+        assert len(result["pages"]) == 2
+        assert result["size"] == 2
+        assert result["start"] == 0
+        assert result["limit"] == 25
+        assert result["has_more"] is False
+
+    def test_has_more_when_full_batch(self, client):
+        """has_more should be True when batch size equals limit."""
+        client._mock_api.get_all_pages_from_space.return_value = [
+            {"id": str(i), "title": f"Page {i}"} for i in range(5)
+        ]
+        result = client.list_pages("DEV", limit=5)
+        assert result["has_more"] is True
+        assert result["size"] == 5
+
+    def test_has_more_false_when_partial_batch(self, client):
+        """has_more should be False when fewer results than limit."""
+        client._mock_api.get_all_pages_from_space.return_value = [
+            {"id": "1", "title": "Only Page"},
+        ]
+        result = client.list_pages("DEV", limit=25)
+        assert result["has_more"] is False
+        assert result["size"] == 1
+
+    def test_pagination_params_passed_through(self, client):
+        """start and limit should be passed through to the result."""
+        client._mock_api.get_all_pages_from_space.return_value = []
+        result = client.list_pages("DEV", start=50, limit=10)
+        assert result["start"] == 50
+        assert result["limit"] == 10
 
 
 class TestAttachments:
@@ -151,6 +180,20 @@ class TestAttachments:
         client._mock_api.attach_file.return_value = {"title": "file.png"}
         result = client.upload_attachment("123", "/tmp/file.png")
         assert result["title"] == "file.png"
+
+    def test_upload_attachment_passes_content_type(self, client):
+        """Suggestion 3: upload_attachment should detect and pass content_type for known types."""
+        client._mock_api.attach_file.return_value = {"title": "readme.txt"}
+        client.upload_attachment("123", "/tmp/readme.txt")
+        call_kwargs = client._mock_api.attach_file.call_args
+        assert call_kwargs[1].get("content_type") == "text/plain"
+
+    def test_upload_attachment_png_content_type(self, client):
+        """MIME type detection for .png files."""
+        client._mock_api.attach_file.return_value = {"title": "image.png"}
+        client.upload_attachment("123", "/tmp/image.png")
+        call_kwargs = client._mock_api.attach_file.call_args
+        assert call_kwargs[1].get("content_type") == "image/png"
 
 
 class TestDownloadAttachment:
@@ -256,6 +299,22 @@ class TestLabels:
         assert client._mock_api.set_page_label.call_count == 2
         assert len(results) == 2
 
+    def test_set_labels_empty_response_falls_back(self, client):
+        """When API returns empty/malformed dict, fall back to input label name."""
+        client._mock_api.set_page_label.return_value = {}
+        results = client.set_labels("123", ["my-label"])
+        assert len(results) == 1
+        assert results[0]["name"] == "my-label"
+        assert results[0]["prefix"] == "global"
+        assert results[0]["id"] is None
+
+    def test_set_labels_list_response_with_empty_entries(self, client):
+        """When API returns a list with empty entries, fall back to input label name."""
+        client._mock_api.set_page_label.return_value = [{}]
+        results = client.set_labels("123", ["tag1"])
+        assert len(results) == 1
+        assert results[0]["name"] == "tag1"
+
     def test_set_labels_call_count(self, client):
         """Each label should increment _call_count."""
         initial = client._call_count
@@ -319,6 +378,18 @@ class TestMovePage:
             "DEV", "123", target_title=None, target_id="456", position="append",
         )
 
+    def test_move_page_returns_normalized_page(self, client):
+        """Bug 3: move_page should return a 'page' key with slim page data, not raw 'result'."""
+        client._mock_api.move_page.return_value = {
+            "page": {"id": "123", "title": "My Page", "version": {"number": 3, "when": "2026-01-01"}}
+        }
+        result = client.move_page("DEV", "123", target_title="New Parent")
+        assert "result" not in result
+        assert "page" in result
+        assert result["page"]["id"] == "123"
+        assert result["page"]["title"] == "My Page"
+        assert result["moved"] is True
+
     def test_move_page_not_found(self, client):
         client._mock_api.move_page.side_effect = Exception("404 Not Found")
         with pytest.raises(ConfpubError) as exc_info:
@@ -347,6 +418,24 @@ class TestErrorTranslation:
         with pytest.raises(ConfpubError) as exc_info:
             client.list_spaces()
         assert exc_info.value.code == ERR_IO_CONNECTION
+
+    def test_403_has_check_input_action(self, client):
+        """Bug 5: 403 errors should have suggested_action='check_input'."""
+        client._mock_api.get_all_spaces.side_effect = Exception("403 Forbidden")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.list_spaces()
+        assert exc_info.value.code == ERR_AUTH_FORBIDDEN
+        assert exc_info.value.suggested_action == "check_input"
+
+    def test_permission_denied_has_check_input_action(self, client):
+        """Bug 5: permission-denied errors should have suggested_action='check_input'."""
+        client._mock_api.get_all_spaces.side_effect = Exception(
+            "User does not have permission to view the content"
+        )
+        with pytest.raises(ConfpubError) as exc_info:
+            client.list_spaces()
+        assert exc_info.value.code == ERR_AUTH_FORBIDDEN
+        assert exc_info.value.suggested_action == "check_input"
 
     def test_permission_error(self, client):
         client._mock_api.get_all_spaces.side_effect = Exception(

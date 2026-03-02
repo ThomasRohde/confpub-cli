@@ -46,6 +46,24 @@ class TestDeriveTitle:
     def test_path_uses_stem_only(self):
         assert derive_title("docs/subfolder/overview.md") == "Overview"
 
+    def test_title_from_h1(self, tmp_path):
+        """Suggestion 2: derive_title with title_from_h1=True extracts H1."""
+        md_file = tmp_path / "test.md"
+        md_file.write_text("# My Custom Title\n\nContent here.")
+        assert derive_title(str(md_file), title_from_h1=True) == "My Custom Title"
+
+    def test_title_from_h1_falls_back_to_filename(self, tmp_path):
+        """When no H1 is found, fall back to filename inference."""
+        md_file = tmp_path / "api-docs.md"
+        md_file.write_text("## Only H2\n\nNo H1 here.")
+        assert derive_title(str(md_file), title_from_h1=True) == "Api Docs"
+
+    def test_explicit_title_beats_h1(self, tmp_path):
+        """Explicit --title should win over --title-from-h1."""
+        md_file = tmp_path / "test.md"
+        md_file.write_text("# H1 Title\n\nContent here.")
+        assert derive_title(str(md_file), "Explicit Title", title_from_h1=True) == "Explicit Title"
+
 
 class TestPublishDryRun:
     @patch("confpub.publish.load_config")

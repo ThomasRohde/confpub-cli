@@ -200,9 +200,10 @@ def _build_page_tree(
         parent_id = str(entry["parent_id"]) if entry["parent_id"] else None
         file_path = file_paths.get(pid, "")
 
+        rel = os.path.relpath(file_path, output_dir).replace("\\", "/") if file_path else ""
         node: dict[str, Any] = {
             "title": page.get("title", ""),
-            "file": os.path.relpath(file_path, output_dir) if file_path else "",
+            "file": rel,
             "children": [],
         }
         if labels_map.get(pid):
@@ -317,7 +318,7 @@ def pull_pages(
             "labels": page_labels,
         })
 
-    # Generate manifest if requested or recursive with multiple pages
+    # Generate manifest if explicitly requested
     manifest_file: str | None = None
     if generate_manifest:
         root_title = root_page.get("title", "")

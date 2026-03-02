@@ -63,7 +63,7 @@ class ConfluenceClient:
             raise ConfpubError(
                 ERR_AUTH_FORBIDDEN,
                 f"Permission denied: {msg}",
-                suggested_action="escalate",
+                suggested_action="check_input",
                 details={"note": "Confluence returns HTTP 403 for both forbidden and nonexistent resources. Verify the resource exists."},
             ) from exc
         if "timeout" in msg.lower() or "Timeout" in msg:
@@ -75,6 +75,7 @@ class ConfluenceClient:
             raise ConfpubError(
                 ERR_AUTH_FORBIDDEN,
                 f"Permission denied ({context}): {msg}",
+                suggested_action="check_input",
                 details={"note": "This may indicate a nonexistent resource; Confluence returns 403 for both."},
             ) from exc
         # Not found (404 or explicit "not found")
@@ -273,17 +274,27 @@ class ConfluenceClient:
             self._handle_error(exc, "list_spaces")
             return []
 
-    def list_pages(self, space: str, *, start: int = 0, limit: int = 25) -> list[dict[str, Any]]:
-        """List pages in a space."""
+    def list_pages(self, space: str, *, start: int = 0, limit: int = 25) -> dict[str, Any]:
+        """List pages in a space.
+
+        Returns a dict with keys: pages, start, limit, size, has_more.
+        """
         self._call_count += 1
         try:
             result = self._api.get_all_pages_from_space(
                 space, start=start, limit=limit, expand="version",
             )
-            return result if isinstance(result, list) else []
+            pages = result if isinstance(result, list) else []
+            return {
+                "pages": pages,
+                "start": start,
+                "limit": limit,
+                "size": len(pages),
+                "has_more": len(pages) >= limit,
+            }
         except Exception as exc:
             self._handle_error(exc, "list_pages")
-            return []
+            return {"pages": [], "start": start, "limit": limit, "size": 0, "has_more": False}
 
     # ------------------------------------------------------------------
     # Attachment operations
@@ -351,7 +362,12 @@ class ConfluenceClient:
         """Upload an attachment to a page."""
         self._call_count += 1
         try:
-            result = self._api.attach_file(filepath, page_id=page_id)
+            import mimetypes
+            content_type, _ = mimetypes.guess_type(filepath)
+            kwargs: dict[str, Any] = {"page_id": page_id}
+            if content_type:
+                kwargs["content_type"] = content_type
+            result = self._api.attach_file(filepath, **kwargs)
             if isinstance(result, dict):
                 # API returns {"results": [...]} wrapper — extract the attachment
                 if "results" in result and isinstance(result["results"], list) and result["results"]:
@@ -441,10 +457,16 @@ class ConfluenceClient:
             self._call_count += 1
             try:
                 result = self._api.set_page_label(page_id, lbl)
-                if isinstance(result, dict):
+                if isinstance(result, dict) and result.get("name"):
                     results.append(_slim_label(result))
                 elif isinstance(result, list):
-                    results.extend(_slim_label(r) for r in result)
+                    results.extend(
+                        _slim_label(r) if isinstance(r, dict) and r.get("name")
+                        else {"name": lbl, "prefix": "global", "id": None}
+                        for r in result
+                    )
+                else:
+                    results.append({"name": lbl, "prefix": "global", "id": None})
             except Exception as exc:
                 self._handle_error(exc, "set_labels")
         return results
@@ -498,11 +520,18 @@ class ConfluenceClient:
                 target_id=target_id,
                 position=position,
             )
+            base_url = self._config.base_url.rstrip("/") if self._config.base_url else ""
+            page_data: dict[str, Any] | None = None
+            if isinstance(result, dict):
+                # The API may return the page directly or nested under a 'page' key
+                raw_page = result.get("page", result) if "page" in result else result
+                if raw_page.get("id"):
+                    page_data = _slim_page(raw_page, base_url=base_url, is_cloud=self._config.is_cloud)
             return {
                 "moved": True,
                 "page_id": page_id,
                 "target_parent": target_title or target_id,
-                "result": result if isinstance(result, dict) else {"raw": str(result)},
+                "page": page_data,
             }
         except Exception as exc:
             self._handle_error(exc, "move_page")

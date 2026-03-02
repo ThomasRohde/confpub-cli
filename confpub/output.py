@@ -16,6 +16,7 @@ import orjson
 # Module-level overrides set by the CLI layer
 _quiet: bool | None = None
 _verbose: bool | None = None
+_compact: bool = False
 
 
 def set_quiet(value: bool) -> None:
@@ -26,6 +27,16 @@ def set_quiet(value: bool) -> None:
 def set_verbose(value: bool) -> None:
     global _verbose
     _verbose = value
+
+
+def set_compact(value: bool) -> None:
+    global _compact
+    _compact = value
+
+
+def is_compact() -> bool:
+    """True when JSON output should be single-line (no indentation)."""
+    return _compact
 
 
 def is_llm_mode() -> bool:

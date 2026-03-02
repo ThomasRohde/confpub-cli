@@ -511,6 +511,56 @@ class TestMultiLevelRecursivePull:
 # ---------------------------------------------------------------------------
 
 
+class TestManifestPathSeparators:
+    """Bug 1: Manifest file paths must use forward slashes on all platforms."""
+
+    def test_manifest_paths_no_backslashes(self, tmp_path):
+        root = _make_page("1", "Root")
+        child = _make_page("2", "Child")
+        pages = {"1": root, "2": child}
+        children = {"1": [child]}
+        client = _mock_client(pages, children)
+
+        with patch("confpub.puller.build_client", return_value=client):
+            result = pull_pages(
+                page_id="1",
+                output_dir=str(tmp_path),
+                recursive=True,
+                layout="nested",
+                generate_manifest=True,
+            )
+
+        manifest_content = Path(result["manifest_file"]).read_text()
+        # No backslashes should appear in any file paths in the manifest
+        for line in manifest_content.split("\n"):
+            if "file:" in line:
+                assert "\\" not in line, f"Backslash found in manifest path: {line}"
+
+
+class TestNestedLayoutNoAutoManifest:
+    """Bug 4: --layout nested without --manifest should NOT create confpub.yaml."""
+
+    def test_nested_without_manifest_flag(self, tmp_path):
+        root = _make_page("1", "Root")
+        child = _make_page("2", "Child")
+        pages = {"1": root, "2": child}
+        children = {"1": [child]}
+        client = _mock_client(pages, children)
+
+        with patch("confpub.puller.build_client", return_value=client):
+            result = pull_pages(
+                page_id="1",
+                output_dir=str(tmp_path),
+                recursive=True,
+                layout="nested",
+                generate_manifest=False,
+            )
+
+        assert result["summary"]["manifest_generated"] is False
+        assert result["manifest_file"] is None
+        assert not (tmp_path / "confpub.yaml").exists()
+
+
 class TestManifestFlag:
     def test_single_page_with_manifest_flag(self, tmp_path):
         """--manifest generates confpub.yaml even for a single page."""
