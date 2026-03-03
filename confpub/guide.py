@@ -25,6 +25,7 @@ from confpub.errors import (
     ERR_IO_TIMEOUT,
     ERR_VALIDATION_ASSET_MISSING,
     ERR_VALIDATION_LABEL,
+    ERR_VALIDATION_SPACE_KEY,
     ERR_VALIDATION_MANIFEST,
     ERR_VALIDATION_MARKDOWN,
     ERR_VALIDATION_NOT_FOUND,
@@ -102,7 +103,9 @@ def build_guide() -> dict[str, Any]:
                 },
                 "agent_hint": (
                     "Use --start and --limit for pagination: first call with --start 0 --limit 25, "
-                    "then if has_more is true, call again with --start 25 --limit 25, and so on."
+                    "then if has_more is true, call again with --start 25 --limit 25, and so on. "
+                    "For personal spaces, quote the tilde: --space '~username' "
+                    "(PowerShell expands unquoted ~). Or set CONFPUB_SPACE env var."
                 ),
             },
             "page.inspect": {
@@ -140,7 +143,9 @@ def build_guide() -> dict[str, Any]:
                     "the stem is extracted, hyphens and underscores are replaced with spaces, "
                     "and the result is title-cased. E.g. 'my-cool-page.md' → 'My Cool Page'. "
                     "Use --title-from-h1 to extract the title from the first # heading in the file. "
-                    "Use --label to apply labels (repeatable): --label api --label docs."
+                    "Use --label to apply labels (repeatable): --label api --label docs. "
+                    "For personal spaces, quote the tilde: --space '~username' "
+                    "(PowerShell expands unquoted ~). Or set CONFPUB_SPACE env var."
                 ),
             },
             "page.move": {
@@ -307,6 +312,7 @@ def build_guide() -> dict[str, Any]:
             ERR_VALIDATION_NOT_FOUND: _error_code_entry(ERR_VALIDATION_NOT_FOUND),
             ERR_VALIDATION_SPACE_MISMATCH: _error_code_entry(ERR_VALIDATION_SPACE_MISMATCH),
             ERR_VALIDATION_LABEL: _error_code_entry(ERR_VALIDATION_LABEL),
+            ERR_VALIDATION_SPACE_KEY: _error_code_entry(ERR_VALIDATION_SPACE_KEY),
             ERR_AUTH_REQUIRED: _error_code_entry(ERR_AUTH_REQUIRED),
             ERR_AUTH_EXPIRED: _error_code_entry(ERR_AUTH_EXPIRED),
             ERR_AUTH_FORBIDDEN: _error_code_entry(ERR_AUTH_FORBIDDEN),
@@ -405,6 +411,13 @@ def build_guide() -> dict[str, Any]:
                 "config_file",
                 "os_keychain",
             ],
+            "env_vars": {
+                "CONFPUB_URL": "Confluence base URL",
+                "CONFPUB_TOKEN": "API token or PAT",
+                "CONFPUB_USER": "User email or username",
+                "CONFPUB_SSL_VERIFY": "SSL verification (true/false/ca-bundle path)",
+                "CONFPUB_SPACE": "Default space key (avoids shell expansion issues with --space)",
+            },
             "non_interactive": (
                 "Never prompts when LLM=true or stdin is non-interactive"
             ),

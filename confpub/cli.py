@@ -13,10 +13,29 @@ from typing import Any, Iterator, Optional
 
 import typer
 
+import os
+
 from confpub import __version__
 from confpub.envelope import Envelope
 from confpub.errors import ConfpubError, exit_code_for, ERR_INTERNAL_SDK
 from confpub.output import emit_stderr, emit_stdout, is_compact, is_verbose, set_compact, set_quiet, set_verbose
+
+
+def _resolve_space(cli_space: str | None, required: bool = False) -> str | None:
+    """Resolve space from CLI flag or CONFPUB_SPACE env var, with validation."""
+    from confpub.config import ENV_SPACE
+    from confpub.errors import validate_space_key
+
+    space = cli_space or os.environ.get(ENV_SPACE)
+    if space is not None:
+        validate_space_key(space)
+        return space
+    if required:
+        raise ConfpubError(
+            "ERR_VALIDATION_REQUIRED",
+            "Space key is required. Use --space or set CONFPUB_SPACE.",
+        )
+    return None
 
 # ---------------------------------------------------------------------------
 # Subcommand group apps
@@ -197,12 +216,14 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
 
 @page_app.command("list")
 def page_list(
-    space: str = typer.Option(..., "--space", help="Confluence space key"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     limit: int = typer.Option(25, "--limit", help="Maximum number of pages to return"),
     start: int = typer.Option(0, "--start", help="Starting offset for pagination"),
 ) -> None:
     """List pages in a Confluence space."""
-    with command_context("page.list", target={"space": space}) as ctx:
+    with command_context("page.list") as ctx:
+        space = _resolve_space(space, required=True)
+        ctx.target = {"space": space}
         from confpub.confluence import build_client, _slim_page
         client = build_client()
         ctx.client = client
@@ -218,7 +239,7 @@ def page_list(
 
 @page_app.command("inspect")
 def page_inspect(
-    space: str = typer.Option(None, "--space", help="Confluence space key"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     title: str = typer.Option(None, "--title", help="Page title"),
     page_id: str = typer.Option(None, "--page-id", help="Confluence page ID"),
     raw: bool = typer.Option(False, "--raw", help="Return full raw API response"),
@@ -226,6 +247,7 @@ def page_inspect(
 ) -> None:
     """Inspect a Confluence page."""
     with command_context("page.inspect", target={"space": space, "title": title, "page_id": page_id}) as ctx:
+        space = _resolve_space(space)
         from confpub.confluence import build_client, _slim_page
         client = build_client()
         ctx.client = client
@@ -258,7 +280,7 @@ def page_inspect(
 @page_app.command("publish")
 def page_publish(
     file: str = typer.Argument(..., help="Markdown file to publish"),
-    space: str = typer.Option(..., "--space", help="Confluence space key"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     parent: Optional[str] = typer.Option(None, "--parent", help="Parent page title"),
     title: Optional[str] = typer.Option(None, "--title", help="Page title (defaults to filename stem, hyphen/underscore→spaces, title-cased)"),
     title_from_h1: bool = typer.Option(False, "--title-from-h1", help="Derive title from first H1 heading in the Markdown file"),
@@ -274,6 +296,8 @@ def page_publish(
     if page_id:
         target["page_id"] = page_id
     with command_context("page.publish", target=target) as ctx:
+        space = _resolve_space(space, required=True)
+        ctx.target["space"] = space
         if not page_id and not parent:
             raise ConfpubError(
                 "ERR_VALIDATION_REQUIRED",
@@ -296,7 +320,7 @@ def page_publish(
 
 @page_app.command("pull")
 def page_pull(
-    space: str = typer.Option(None, "--space", help="Confluence space key"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     title: str = typer.Option(None, "--title", help="Page title"),
     page_id: str = typer.Option(None, "--page-id", help="Confluence page ID"),
     output: str = typer.Option(".", "--output", "-o", help="Output directory"),
@@ -307,8 +331,8 @@ def page_pull(
     manifest: bool = typer.Option(False, "--manifest", help="Generate confpub.yaml manifest"),
 ) -> None:
     """Pull Confluence pages to local Markdown files."""
-    target = {"space": space, "title": title, "page_id": page_id}
-    with command_context("page.pull", target=target) as ctx:
+    with command_context("page.pull", target={"space": space, "title": title, "page_id": page_id}) as ctx:
+        space = _resolve_space(space)
         from confpub.errors import ERR_VALIDATION_REQUIRED
         if not page_id and not (space and title):
             raise ConfpubError(
@@ -333,13 +357,14 @@ def page_pull(
 
 @page_app.command("delete")
 def page_delete(
-    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     title: Optional[str] = typer.Option(None, "--title", help="Page title"),
     page_id: Optional[str] = typer.Option(None, "--page-id", help="Confluence page ID"),
     cascade: bool = typer.Option(False, "--cascade", help="Also delete child pages"),
 ) -> None:
     """Delete a Confluence page."""
     with command_context("page.delete", target={"space": space, "title": title, "page_id": page_id}) as ctx:
+        space = _resolve_space(space)
         if not page_id and not (space and title):
             raise ConfpubError(
                 "ERR_VALIDATION_REQUIRED",
@@ -384,12 +409,13 @@ def page_delete(
 def page_move(
     page_id: str = typer.Option(..., "--page-id", help="Confluence page ID to move"),
     target_parent: Optional[str] = typer.Option(None, "--target-parent", help="Title of the new parent page"),
-    space: Optional[str] = typer.Option(None, "--space", help="Space key (required with --target-parent)"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     target_parent_id: Optional[str] = typer.Option(None, "--target-parent-id", help="Page ID of the new parent"),
 ) -> None:
     """Move a page under a new parent."""
     target = {"page_id": page_id}
     with command_context("page.move", target=target) as ctx:
+        space = _resolve_space(space)
         if not target_parent and not target_parent_id:
             raise ConfpubError(
                 "ERR_VALIDATION_REQUIRED",
@@ -460,11 +486,12 @@ def attachment_upload(
 def plan_create(
     manifest: str = typer.Option(..., "--manifest", help="Path to confpub.yaml manifest"),
     output: Optional[str] = typer.Option(None, "--output", help="Output path for plan artifact"),
-    space: Optional[str] = typer.Option(None, "--space", help="Override manifest space"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     parent: Optional[str] = typer.Option(None, "--parent", help="Override manifest parent"),
 ) -> None:
     """Generate a plan artifact from a manifest."""
     with command_context("plan.create", target={"manifest": manifest}) as ctx:
+        space = _resolve_space(space)
         from confpub.planner import create_plan
         result = create_plan(
             manifest_path=manifest,
@@ -668,7 +695,7 @@ def comment_add(
 @app.command("search")
 def search(
     cql: Optional[str] = typer.Option(None, "--cql", help="Raw CQL query"),
-    space: Optional[str] = typer.Option(None, "--space", help="Filter by space key"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     title: Optional[str] = typer.Option(None, "--title", help="Search by page title (fuzzy match)"),
     content_type: Optional[str] = typer.Option(None, "--type", help="Filter by content type (page, blogpost, etc.)"),
     limit: int = typer.Option(25, "--limit", help="Maximum results to return"),
@@ -677,8 +704,8 @@ def search(
     excerpt_length: int = typer.Option(200, "--excerpt-length", help="Max excerpt chars (0 = unlimited)"),
 ) -> None:
     """Search Confluence content using CQL."""
-    target = {"cql": cql, "space": space, "title": title, "type": content_type}
-    with command_context("search", target=target) as ctx:
+    with command_context("search", target={"cql": cql, "space": space, "title": title, "type": content_type}) as ctx:
+        space = _resolve_space(space)
         # Build effective CQL from flags
         fragments: list[str] = []
         if space:

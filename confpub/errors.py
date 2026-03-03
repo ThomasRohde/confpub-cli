@@ -16,6 +16,7 @@ ERR_VALIDATION_ASSET_MISSING = "ERR_VALIDATION_ASSET_MISSING"
 ERR_VALIDATION_SPACE_MISMATCH = "ERR_VALIDATION_SPACE_MISMATCH"
 ERR_VALIDATION_NOT_FOUND = "ERR_VALIDATION_NOT_FOUND"
 ERR_VALIDATION_LABEL = "ERR_VALIDATION_LABEL"
+ERR_VALIDATION_SPACE_KEY = "ERR_VALIDATION_SPACE_KEY"
 
 # Auth (exit 20)
 ERR_AUTH_REQUIRED = "ERR_AUTH_REQUIRED"
@@ -167,6 +168,33 @@ def io_error(
     **details: Any,
 ) -> ConfpubError:
     return ConfpubError(code, message, details=details if details else None)
+
+
+def validate_space_key(space: str | None) -> None:
+    """Reject space values that look like shell-expanded paths.
+
+    PowerShell expands unquoted ``~username`` to a Windows home path
+    (e.g. ``C:\\Users\\username``).  Catching this early gives the caller an
+    actionable error instead of a confusing Confluence API failure.
+    """
+    if space is None:
+        return
+    import re
+    if "\\" in space or "/" in space or re.match(r"^[A-Za-z]:", space):
+        raise ConfpubError(
+            ERR_VALIDATION_SPACE_KEY,
+            (
+                f"Space key '{space}' appears to be a shell-expanded path. "
+                "Quote the value: --space '~username' or set CONFPUB_SPACE=~username"
+            ),
+            details={
+                "fix_options": [
+                    "Quote the --space value: --space '~username'",
+                    "Set the CONFPUB_SPACE environment variable instead",
+                    "Use the space key without shell-expandable characters",
+                ],
+            },
+        )
 
 
 def internal_error(

@@ -125,6 +125,110 @@ class TestPersonalSpaceKeyCLI:
         assert captured["space"] == "~thro"
 
 
+class TestSpaceKeyValidation:
+    """Reject space values that look like shell-expanded paths."""
+
+    def test_windows_path_detected(self):
+        result = runner.invoke(app, ["page", "list", "--space", "C:\\Users\\thro"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_SPACE_KEY"
+
+    def test_unix_home_path_detected(self):
+        result = runner.invoke(app, ["page", "list", "--space", "/home/thro"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_SPACE_KEY"
+
+    def test_backslash_in_value_detected(self):
+        result = runner.invoke(app, ["page", "list", "--space", "some\\path"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_SPACE_KEY"
+
+    def test_valid_tilde_space_passes(self, monkeypatch):
+        def fake_list_pages(self, space, **kwargs):
+            return {"pages": [], "start": 0, "limit": 25, "size": 0, "has_more": False}
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+
+        result = runner.invoke(app, ["page", "list", "--space", "~thro"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["ok"] is True
+
+    def test_plain_space_key_passes(self, monkeypatch):
+        def fake_list_pages(self, space, **kwargs):
+            return {"pages": [], "start": 0, "limit": 25, "size": 0, "has_more": False}
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+
+        result = runner.invoke(app, ["page", "list", "--space", "DEV"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["ok"] is True
+
+
+class TestConfpubSpaceEnvVar:
+    """CONFPUB_SPACE env var as an alternative to --space."""
+
+    def test_env_var_used_when_no_flag(self, monkeypatch):
+        def fake_list_pages(self, space, **kwargs):
+            self._captured_space = space
+            return {"pages": [], "start": 0, "limit": 25, "size": 0, "has_more": False}
+
+        from confpub.confluence import ConfluenceClient
+        mock_client = ConfluenceClient.__new__(ConfluenceClient)
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: mock_client)
+        monkeypatch.setenv("CONFPUB_SPACE", "~thro")
+
+        result = runner.invoke(app, ["page", "list"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        assert mock_client._captured_space == "~thro"
+
+    def test_cli_flag_overrides_env(self, monkeypatch):
+        captured = {}
+
+        def fake_list_pages(self, space, **kwargs):
+            captured["space"] = space
+            return {"pages": [], "start": 0, "limit": 25, "size": 0, "has_more": False}
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+        monkeypatch.setenv("CONFPUB_SPACE", "~env")
+
+        result = runner.invoke(app, ["page", "list", "--space", "~cli"])
+        assert result.exit_code == 0
+        assert captured["space"] == "~cli"
+
+    def test_env_var_also_validated(self, monkeypatch):
+        monkeypatch.setenv("CONFPUB_SPACE", "C:\\Users\\thro")
+
+        result = runner.invoke(app, ["page", "list"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_SPACE_KEY"
+
+    def test_missing_space_mentions_env(self):
+        result = runner.invoke(app, ["page", "list"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert "CONFPUB_SPACE" in data["errors"][0]["message"]
+
+
 class TestSearchCommand:
     def test_search_help(self):
         result = runner.invoke(app, ["search", "--help"])
