@@ -382,6 +382,38 @@ def build_guide() -> dict[str, Any]:
                 ),
             ],
         },
+        "markdown_support": {
+            "description": "Markdown features converted to native Confluence Storage Format.",
+            "base": "CommonMark with GitHub-flavored extensions",
+            "features": {
+                "headings":       "# h1 through ###### h6 → <h1>–<h6>",
+                "bold_italic":    "**bold**, *italic* → <strong>, <em>",
+                "strikethrough":  "~~text~~ → <del>",
+                "inline_code":    "`code` → <code>",
+                "code_blocks":    "```lang ... ``` → ac:structured-macro code with language param",
+                "links":          "[text](url) → <a href>",
+                "images":         "![alt](path) → ac:image (local files uploaded as attachments)",
+                "tables":         "GFM tables → <table>",
+                "lists":          "Ordered and unordered, nested → <ol>, <ul>",
+                "blockquotes":    "> text → <blockquote>",
+                "admonitions":    "> [!NOTE|TIP|WARNING|CAUTION|IMPORTANT] → info/tip/warning/note macros",
+                "task_lists":     "- [ ] / - [x] → ac:task-list with ac:task elements",
+                "math_inline":    "$LaTeX$ → ac:structured-macro mathinline",
+                "math_block":     "$$...$$ → ac:structured-macro mathblock",
+                "definition_lists": "Term\\n: Definition → <dl><dt><dd>",
+                "footnotes":      "[^1] + [^1]: text → superscript links with numbered list",
+                "front_matter":   "---\\nyaml\\n--- → silently stripped",
+                "panels":         "::: panel Title\\ncontent\\n::: → ac:structured-macro panel",
+                "expand":         "::: expand Title\\ncontent\\n::: → ac:structured-macro expand",
+                "layouts":        ":::: layout two-equal\\n::: cell\\n...\\n::::\\n → ac:layout with ac:layout-section",
+            },
+            "layout_types": ["single", "two-equal", "two-left-sidebar", "two-right-sidebar", "three-equal", "three-with-sidebars"],
+            "agent_hint": (
+                "All features are always-on — the parser simply ignores syntax that isn't used. "
+                "Math macros require the Confluence LaTeX Math plugin to be installed on the server. "
+                "Layouts use :::: (4 colons) for the outer layout block and ::: (3 colons) for inner cells."
+            ),
+        },
         "assertions": {
             "description": "Post-condition assertions verified by plan.verify.",
             "file_format": "JSON array of assertion objects, or embedded in confpub.yaml under the 'assertions' key.",

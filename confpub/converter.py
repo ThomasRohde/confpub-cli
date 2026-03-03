@@ -15,6 +15,12 @@ from typing import Any
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
+from mdit_py_plugins.tasklists import tasklists_plugin
+from mdit_py_plugins.dollarmath import dollarmath_plugin
+from mdit_py_plugins.deflist import deflist_plugin
+from mdit_py_plugins.footnote import footnote_plugin
+from mdit_py_plugins.front_matter import front_matter_plugin
+from mdit_py_plugins.container import container_plugin
 
 # Admonition types mapping: GitHub [!TYPE] → Confluence macro name
 ADMONITION_MAP: dict[str, str] = {
@@ -34,12 +40,16 @@ class ConfluenceRenderer:
 
     def __init__(self) -> None:
         self._output: list[str] = []
-        self._list_stack: list[str] = []  # track nested ol/ul
+        self._list_stack: list[str] = []  # track nested ol/ul ("ol", "ul", "task-list")
+        self._task_id: int = 0  # incrementing counter for Confluence task IDs
+        self._footnote_refs: dict[int, int] = {}  # meta.id → display number
 
     def render(self, tokens: list[Token], options: dict[str, Any], env: dict[str, Any]) -> str:
         """Render a list of tokens to Confluence Storage Format."""
         self._output = []
         self._list_stack = []
+        self._task_id = 0
+        self._footnote_refs = {}
         i = 0
         while i < len(tokens):
             token = tokens[i]
@@ -71,10 +81,14 @@ class ConfluenceRenderer:
         return idx + 1
 
     def _render_paragraph_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        if self._list_stack and self._list_stack[-1] == "task-list":
+            return idx + 1  # suppress <p> inside task-body
         self._output.append("<p>")
         return idx + 1
 
     def _render_paragraph_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        if self._list_stack and self._list_stack[-1] == "task-list":
+            return idx + 1  # suppress </p> inside task-body
         self._output.append("</p>")
         return idx + 1
 
@@ -94,6 +108,10 @@ class ConfluenceRenderer:
             # Fallback for unknown inline types
             if token.type == "text":
                 self._output.append(escape(token.content))
+            elif token.type == "math_inline":
+                self._inline_math_inline(token)
+            elif token.type == "footnote_ref":
+                self._inline_footnote_ref(token)
 
     # ------------------------------------------------------------------
     # Inline tokens
@@ -253,23 +271,59 @@ class ConfluenceRenderer:
         return idx + 1
 
     def _render_bullet_list_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
-        self._output.append("<ul>")
-        self._list_stack.append("ul")
+        token = tokens[idx]
+        attrs = token.attrs or {}
+        if isinstance(attrs, dict) and attrs.get("class") == "contains-task-list":
+            self._output.append("<ac:task-list>")
+            self._list_stack.append("task-list")
+        else:
+            self._output.append("<ul>")
+            self._list_stack.append("ul")
         return idx + 1
 
     def _render_bullet_list_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
-        self._output.append("</ul>")
+        if self._list_stack and self._list_stack[-1] == "task-list":
+            self._output.append("</ac:task-list>")
+        else:
+            self._output.append("</ul>")
         if self._list_stack:
             self._list_stack.pop()
         return idx + 1
 
     def _render_list_item_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
-        self._output.append("<li>")
+        token = tokens[idx]
+        attrs = token.attrs or {}
+        if isinstance(attrs, dict) and attrs.get("class") == "task-list-item":
+            self._task_id += 1
+            checked = self._is_task_checked(tokens, idx)
+            status = "complete" if checked else "incomplete"
+            self._output.append("<ac:task>")
+            self._output.append(f"<ac:task-id>{self._task_id}</ac:task-id>")
+            self._output.append(f"<ac:task-status>{status}</ac:task-status>")
+            self._output.append("<ac:task-body>")
+        else:
+            self._output.append("<li>")
         return idx + 1
 
     def _render_list_item_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
-        self._output.append("</li>")
+        if self._list_stack and self._list_stack[-1] == "task-list":
+            self._output.append("</ac:task-body></ac:task>")
+        else:
+            self._output.append("</li>")
         return idx + 1
+
+    @staticmethod
+    def _is_task_checked(tokens: list[Token], list_item_idx: int) -> bool:
+        """Look ahead from list_item_open to find the checkbox html_inline and check state."""
+        for i in range(list_item_idx + 1, min(list_item_idx + 10, len(tokens))):
+            tok = tokens[i]
+            if tok.type == "list_item_close":
+                break
+            if tok.type == "inline" and tok.children:
+                for child in tok.children:
+                    if child.type == "html_inline" and "checkbox" in (child.content or ""):
+                        return 'checked="checked"' in child.content or "checked" in child.content.split()
+        return False
 
     # ------------------------------------------------------------------
     # Tables
@@ -340,7 +394,169 @@ class ConfluenceRenderer:
         return idx + 1
 
     def _inline_html_inline(self, token: Token) -> None:
+        # Suppress task-list checkboxes (already handled by _render_list_item_open)
+        if "task-list-item-checkbox" in (token.content or ""):
+            return
         self._output.append(token.content)
+
+    # ------------------------------------------------------------------
+    # Dollar math (inline and block)
+    # ------------------------------------------------------------------
+
+    def _inline_math_inline(self, token: Token) -> None:
+        latex = token.content
+        self._output.append(
+            '<ac:structured-macro ac:name="mathinline">'
+            f"<ac:plain-text-body><![CDATA[{latex}]]></ac:plain-text-body>"
+            "</ac:structured-macro>"
+        )
+
+    def _render_math_block(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        latex = tokens[idx].content
+        self._output.append(
+            '<ac:structured-macro ac:name="mathblock">'
+            f"<ac:plain-text-body><![CDATA[{latex}]]></ac:plain-text-body>"
+            "</ac:structured-macro>"
+        )
+        return idx + 1
+
+    # ------------------------------------------------------------------
+    # Definition lists
+    # ------------------------------------------------------------------
+
+    def _render_dl_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("<dl>")
+        return idx + 1
+
+    def _render_dl_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</dl>")
+        return idx + 1
+
+    def _render_dt_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("<dt>")
+        return idx + 1
+
+    def _render_dt_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</dt>")
+        return idx + 1
+
+    def _render_dd_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("<dd>")
+        return idx + 1
+
+    def _render_dd_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</dd>")
+        return idx + 1
+
+    # ------------------------------------------------------------------
+    # Footnotes
+    # ------------------------------------------------------------------
+
+    def _inline_footnote_ref(self, token: Token) -> None:
+        meta_id = token.meta.get("id", 0) if token.meta else 0
+        # Display number is 1-based
+        display_num = meta_id + 1
+        self._footnote_refs[meta_id] = display_num
+        self._output.append(
+            f'<sup><a id="footnote-ref-{display_num}" href="#footnote-{display_num}">'
+            f"[{display_num}]</a></sup>"
+        )
+
+    def _render_footnote_block_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("<hr /><ol>")
+        return idx + 1
+
+    def _render_footnote_block_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</ol>")
+        return idx + 1
+
+    def _render_footnote_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        meta_id = tokens[idx].meta.get("id", 0) if tokens[idx].meta else 0
+        display_num = meta_id + 1
+        self._output.append(f'<li id="footnote-{display_num}">')
+        return idx + 1
+
+    def _render_footnote_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</li>")
+        return idx + 1
+
+    def _render_footnote_anchor(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        meta_id = tokens[idx].meta.get("id", 0) if tokens[idx].meta else 0
+        display_num = meta_id + 1
+        self._output.append(
+            f' <a href="#footnote-ref-{display_num}">\u21a9</a>'
+        )
+        return idx + 1
+
+    # ------------------------------------------------------------------
+    # Front matter (silently stripped)
+    # ------------------------------------------------------------------
+
+    def _render_front_matter(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        return idx + 1  # no output
+
+    # ------------------------------------------------------------------
+    # Container: panel
+    # ------------------------------------------------------------------
+
+    def _render_container_panel_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        info = tokens[idx].info.strip() if tokens[idx].info else ""
+        # info is e.g. "panel My Title" — strip the container name prefix
+        title = info[len("panel"):].strip() if info.startswith("panel") else info
+        self._output.append('<ac:structured-macro ac:name="panel">')
+        if title:
+            self._output.append(f'<ac:parameter ac:name="title">{escape(title)}</ac:parameter>')
+        self._output.append("<ac:rich-text-body>")
+        return idx + 1
+
+    def _render_container_panel_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</ac:rich-text-body></ac:structured-macro>")
+        return idx + 1
+
+    # ------------------------------------------------------------------
+    # Container: expand
+    # ------------------------------------------------------------------
+
+    def _render_container_expand_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        info = tokens[idx].info.strip() if tokens[idx].info else ""
+        title = info[len("expand"):].strip() if info.startswith("expand") else info
+        self._output.append('<ac:structured-macro ac:name="expand">')
+        if title:
+            self._output.append(f'<ac:parameter ac:name="title">{escape(title)}</ac:parameter>')
+        self._output.append("<ac:rich-text-body>")
+        return idx + 1
+
+    def _render_container_expand_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</ac:rich-text-body></ac:structured-macro>")
+        return idx + 1
+
+    # ------------------------------------------------------------------
+    # Container: layout
+    # ------------------------------------------------------------------
+
+    def _render_container_layout_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        info = tokens[idx].info.strip() if tokens[idx].info else ""
+        layout_type = info[len("layout"):].strip() if info.startswith("layout") else info
+        # Convert hyphens to underscores for Confluence ac:type
+        layout_type = layout_type.replace("-", "_") if layout_type else "single"
+        self._output.append(f'<ac:layout><ac:layout-section ac:type="{escape(layout_type)}">')
+        return idx + 1
+
+    def _render_container_layout_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</ac:layout-section></ac:layout>")
+        return idx + 1
+
+    # ------------------------------------------------------------------
+    # Container: cell
+    # ------------------------------------------------------------------
+
+    def _render_container_cell_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("<ac:layout-cell>")
+        return idx + 1
+
+    def _render_container_cell_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</ac:layout-cell>")
+        return idx + 1
 
 
 def _create_parser() -> MarkdownIt:
@@ -348,6 +564,16 @@ def _create_parser() -> MarkdownIt:
     md = MarkdownIt("commonmark", {"html": True})
     md.enable("table")
     md.enable("strikethrough")
+    # mdit-py-plugins
+    tasklists_plugin(md)
+    dollarmath_plugin(md)
+    deflist_plugin(md)
+    footnote_plugin(md)
+    front_matter_plugin(md)
+    container_plugin(md, name="panel")
+    container_plugin(md, name="expand")
+    container_plugin(md, name="layout")
+    container_plugin(md, name="cell")
     return md
 
 

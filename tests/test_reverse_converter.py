@@ -248,6 +248,158 @@ class TestMixedContent:
         assert len(result.unknown_macros) == 0
 
 
+class TestTaskListReverse:
+    def test_unchecked_task(self):
+        html = (
+            '<ac:task-list><ac:task>'
+            '<ac:task-id>1</ac:task-id>'
+            '<ac:task-status>incomplete</ac:task-status>'
+            '<ac:task-body>Buy milk</ac:task-body>'
+            '</ac:task></ac:task-list>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert "[ ] Buy milk" in result.markdown
+
+    def test_checked_task(self):
+        html = (
+            '<ac:task-list><ac:task>'
+            '<ac:task-id>1</ac:task-id>'
+            '<ac:task-status>complete</ac:task-status>'
+            '<ac:task-body>Done item</ac:task-body>'
+            '</ac:task></ac:task-list>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert "[x] Done item" in result.markdown
+
+
+class TestMathReverse:
+    def test_inline_math(self):
+        html = (
+            '<ac:structured-macro ac:name="mathinline">'
+            '<ac:plain-text-body><![CDATA[E=mc^2]]></ac:plain-text-body>'
+            '</ac:structured-macro>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert "$E=mc^2$" in result.markdown
+
+    def test_block_math(self):
+        html = (
+            '<ac:structured-macro ac:name="mathblock">'
+            '<ac:plain-text-body><![CDATA[x^2 + y^2 = z^2]]></ac:plain-text-body>'
+            '</ac:structured-macro>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert "$$" in result.markdown
+        assert "x^2 + y^2 = z^2" in result.markdown
+
+
+class TestDefinitionListReverse:
+    def test_basic_deflist(self):
+        html = "<dl><dt>Term</dt><dd>Definition here</dd></dl>"
+        result = convert_storage_to_markdown(html)
+        assert "Term" in result.markdown
+        assert ": Definition here" in result.markdown
+
+
+class TestFootnoteReverse:
+    def test_footnote_ref_and_def(self):
+        html = (
+            '<p>Text with <sup><a id="footnote-ref-1" href="#footnote-1">[1]</a></sup>.</p>'
+            '<hr /><ol><li id="footnote-1">Footnote text. '
+            '<a href="#footnote-ref-1">\u21a9</a></li></ol>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert "[^1]" in result.markdown
+        assert "[^1]: Footnote text." in result.markdown
+
+
+class TestPanelReverse:
+    def test_panel_with_title(self):
+        html = (
+            '<ac:structured-macro ac:name="panel">'
+            '<ac:parameter ac:name="title">My Panel</ac:parameter>'
+            '<ac:rich-text-body><p>Panel content.</p></ac:rich-text-body>'
+            '</ac:structured-macro>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert "::: panel My Panel" in result.markdown
+        assert "Panel content." in result.markdown
+        assert ":::" in result.markdown
+
+
+class TestExpandReverse:
+    def test_expand_with_title(self):
+        html = (
+            '<ac:structured-macro ac:name="expand">'
+            '<ac:parameter ac:name="title">Click me</ac:parameter>'
+            '<ac:rich-text-body><p>Hidden content.</p></ac:rich-text-body>'
+            '</ac:structured-macro>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert "::: expand Click me" in result.markdown
+        assert "Hidden content." in result.markdown
+
+
+class TestLayoutReverse:
+    def test_layout_with_cells(self):
+        html = (
+            '<ac:layout><ac:layout-section ac:type="two_equal">'
+            '<ac:layout-cell><p>Left</p></ac:layout-cell>'
+            '<ac:layout-cell><p>Right</p></ac:layout-cell>'
+            '</ac:layout-section></ac:layout>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert ":::: layout two-equal" in result.markdown
+        assert "::: cell" in result.markdown
+        assert "Left" in result.markdown
+        assert "Right" in result.markdown
+        assert "::::" in result.markdown
+
+
+class TestPluginRoundTrips:
+    """Test round-trip conversion for new plugin features."""
+
+    def test_task_list_round_trip(self):
+        from confpub.converter import convert_markdown
+        md = "- [ ] Todo\n- [x] Done\n"
+        storage = convert_markdown(md)
+        result = convert_storage_to_markdown(storage)
+        assert "[ ] Todo" in result.markdown
+        assert "[x] Done" in result.markdown
+
+    def test_deflist_round_trip(self):
+        from confpub.converter import convert_markdown
+        md = "Apple\n:   A fruit\n"
+        storage = convert_markdown(md)
+        result = convert_storage_to_markdown(storage)
+        assert "Apple" in result.markdown
+        assert ": A fruit" in result.markdown
+
+    def test_front_matter_stripped_round_trip(self):
+        from confpub.converter import convert_markdown
+        md = "---\ntitle: Test\n---\n\n# Hello\n"
+        storage = convert_markdown(md)
+        assert "title:" not in storage
+        assert "<h1>" in storage
+
+    def test_panel_round_trip(self):
+        from confpub.converter import convert_markdown
+        md = "::: panel My Title\nContent here.\n:::\n"
+        storage = convert_markdown(md)
+        result = convert_storage_to_markdown(storage)
+        assert "panel" in result.markdown.lower()
+        assert "Content here." in result.markdown
+
+    def test_layout_round_trip(self):
+        from confpub.converter import convert_markdown
+        md = ":::: layout two-equal\n::: cell\nLeft\n:::\n::: cell\nRight\n:::\n::::\n"
+        storage = convert_markdown(md)
+        result = convert_storage_to_markdown(storage)
+        assert "layout" in result.markdown
+        assert "Left" in result.markdown
+        assert "Right" in result.markdown
+
+
 class TestRoundTrip:
     """Test that content survives a round-trip through conversion."""
 

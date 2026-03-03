@@ -77,7 +77,7 @@ confpub plan apply --plan confpub-plan.json --dry-run
 
 - **Structured JSON output** — every command returns the same envelope shape on stdout
 - **Transactional workflow** — plan → validate → apply → verify with fingerprint-based conflict detection
-- **Markdown → Confluence** — code blocks become code macros, `> [!NOTE]` becomes Info panels, tables stay tables
+- **Markdown → Confluence** — code blocks become code macros, `> [!NOTE]` becomes Info panels, tables stay tables, task lists, math, definition lists, footnotes, panels, expand/collapse, and page layouts
 - **Asset handling** — images are uploaded as attachments and URLs are rewritten automatically
 - **Idempotent** — a lockfile tracks page IDs so re-publishing updates in place
 - **Agent-ready** — `confpub guide` returns the full CLI schema; `LLM=true` suppresses interactive behavior
@@ -303,6 +303,15 @@ confpub converts Markdown to Confluence Storage Format (and back via `page pull`
 | `![img](photo.png)` | Upload attachment + `<ac:image>` reference |
 | Tables | Standard XHTML `<table>` |
 | `~~strikethrough~~` | `<del>strikethrough</del>` |
+| `- [ ] task` / `- [x] done` | `<ac:task-list>` with task status |
+| `$E=mc^2$` | LaTeX math macro (inline) |
+| `$$...$$` | LaTeX math macro (block) |
+| `Term` + `: Definition` | `<dl><dt><dd>` definition list |
+| `[^1]` footnotes | Superscript links + numbered list |
+| `::: panel Title` | Confluence Panel macro |
+| `::: expand Title` | Confluence Expand macro |
+| `:::: layout two-equal` | Confluence page layout |
+| `---yaml---` front matter | Silently stripped |
 
 ---
 

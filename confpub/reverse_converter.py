@@ -43,17 +43,46 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
         kwargs.setdefault("heading_style", "ATX")
         kwargs.setdefault("bullets", "-")
         kwargs.setdefault("code_language", "")
-        kwargs.setdefault("strip", ["span"])
+        # Don't strip spans — we use <span> for inline macros like mathinline.
+        # Regular spans are handled in convert_span by returning raw text.
         super().__init__(**kwargs)
+
+    # ------------------------------------------------------------------
+    # Definition list support
+    # ------------------------------------------------------------------
+
+    def convert_dl(self, el: Tag, text: str, parent_tags: set | None = None) -> str:
+        return "\n\n" + text.strip() + "\n\n"
+
+    def convert_dt(self, el: Tag, text: str, parent_tags: set | None = None) -> str:
+        return text.strip() + "\n"
+
+    def convert_dd(self, el: Tag, text: str, parent_tags: set | None = None) -> str:
+        return ": " + text.strip() + "\n"
 
     # ------------------------------------------------------------------
     # Confluence macro handlers (dispatched via data-confluence-macro attr)
     # ------------------------------------------------------------------
 
+    def convert_span(self, el: Tag, text: str, parent_tags: set | None = None) -> str:
+        macro_name = el.get("data-confluence-macro")
+        if macro_name:
+            return self._convert_macro(el, text, str(macro_name))
+        return text
+
     def convert_div(self, el: Tag, text: str, parent_tags: set | None = None) -> str:
         macro_name = el.get("data-confluence-macro")
         if macro_name:
             return self._convert_macro(el, text, str(macro_name))
+        # Layout containers (from _preprocess_storage_format)
+        layout_macro = el.get("data-layout-macro")
+        if layout_macro == "layout":
+            layout_type = el.get("data-layout-type", "single")
+            inner = text.strip()
+            return f"\n\n:::: layout {layout_type}\n{inner}\n::::\n\n"
+        if layout_macro == "cell":
+            inner = text.strip()
+            return f"\n::: cell\n{inner}\n:::\n"
         return text
 
     def _convert_macro(self, el: Tag, text: str, macro_name: str) -> str:
@@ -61,12 +90,60 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
             return self._convert_code_macro(el)
         if macro_name in REVERSE_ADMONITION_MAP:
             return self._convert_admonition_macro(el, text, macro_name)
+        if macro_name == "mathinline":
+            return self._convert_mathinline_macro(el)
+        if macro_name == "mathblock":
+            return self._convert_mathblock_macro(el)
+        if macro_name == "panel":
+            return self._convert_panel_macro(el)
+        if macro_name == "expand":
+            return self._convert_expand_macro(el)
         # Unknown macro
         self._unknown_macros.append(macro_name)
         self._warnings.append(f"Unknown macro '{macro_name}' converted to HTML comment")
         params = el.get("data-macro-params", "")
         param_str = f" params={params}" if params else ""
         return f"\n\n<!-- confluence-macro: {macro_name}{param_str} -->\n\n"
+
+    def _convert_mathinline_macro(self, el: Tag) -> str:
+        code_el = el.find("pre", class_="confluence-code-body")
+        latex = code_el.get_text() if code_el else el.get_text()
+        return f"${latex}$"
+
+    def _convert_mathblock_macro(self, el: Tag) -> str:
+        code_el = el.find("pre", class_="confluence-code-body")
+        latex = code_el.get_text() if code_el else el.get_text()
+        return f"\n\n$$\n{latex}\n$$\n\n"
+
+    def _convert_panel_macro(self, el: Tag) -> str:
+        params = el.get("data-macro-params", "") or ""
+        title = ""
+        for part in str(params).split("; "):
+            if part.startswith("title="):
+                title = part[len("title="):]
+                break
+        body_el = el.find("div", class_="confluence-rich-text-body")
+        if body_el:
+            body_text = self.convert(str(body_el)).strip()
+        else:
+            body_text = el.get_text().strip()
+        header = f"panel {title}" if title else "panel"
+        return f"\n\n::: {header}\n{body_text}\n:::\n\n"
+
+    def _convert_expand_macro(self, el: Tag) -> str:
+        params = el.get("data-macro-params", "") or ""
+        title = ""
+        for part in str(params).split("; "):
+            if part.startswith("title="):
+                title = part[len("title="):]
+                break
+        body_el = el.find("div", class_="confluence-rich-text-body")
+        if body_el:
+            body_text = self.convert(str(body_el)).strip()
+        else:
+            body_text = el.get_text().strip()
+        header = f"expand {title}" if title else "expand"
+        return f"\n\n::: {header}\n{body_text}\n:::\n\n"
 
     def _convert_code_macro(self, el: Tag) -> str:
         language = el.get("data-macro-language", "") or ""
@@ -139,10 +216,15 @@ def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
     warnings: list[str] = []
     soup = BeautifulSoup(html, "html.parser")
 
-    # 1. Transform ac:structured-macro → div[data-confluence-macro]
+    # Inline macro names that should become <span> not <div> to preserve
+    # surrounding whitespace when markdownify processes them.
+    _INLINE_MACROS = {"mathinline"}
+
+    # 1. Transform ac:structured-macro → div/span[data-confluence-macro]
     for macro in soup.find_all("ac:structured-macro"):
         macro_name = macro.get("ac:name", "unknown")
-        div = soup.new_tag("div")
+        tag_name = "span" if macro_name in _INLINE_MACROS else "div"
+        div = soup.new_tag(tag_name)
         div["data-confluence-macro"] = macro_name
 
         # Extract parameters
@@ -199,7 +281,84 @@ def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
 
         img_macro.replace_with(img)
 
-    # 3. Transform ac:link → a
+    # 3. Transform ac:task-list → ul with checkbox text
+    for task_list in soup.find_all("ac:task-list"):
+        ul = soup.new_tag("ul")
+        for task in task_list.find_all("ac:task", recursive=False):
+            li = soup.new_tag("li")
+            status_el = task.find("ac:task-status")
+            status = status_el.get_text().strip() if status_el else "incomplete"
+            checkbox = "[x] " if status == "complete" else "[ ] "
+            body_el = task.find("ac:task-body")
+            body_text = body_el.get_text().strip() if body_el else ""
+            li.string = checkbox + body_text
+            ul.append(li)
+        task_list.replace_with(ul)
+
+    # 4. Transform footnote markup
+    # Footnote refs: <sup><a href="#footnote-N">[N]</a></sup>
+    for sup in soup.find_all("sup"):
+        a_tag = sup.find("a")
+        if a_tag and a_tag.get("href", "").startswith("#footnote-"):
+            text = a_tag.get_text()
+            # e.g. "[1]" → "[^1]"
+            if text.startswith("[") and text.endswith("]"):
+                num = text[1:-1]
+                sup.replace_with(f"[^{num}]")
+
+    # Footnote definitions: detect by id="footnote-N" OR by back-link pattern
+    # (Confluence strips id attrs, so we fall back to detecting back-links)
+    _footnote_back_re = re.compile(r"#footnote-ref-(\d+)")
+    footnote_lis_found = False
+    for li in soup.find_all("li"):
+        li_id = li.get("id", "")
+        num = None
+        if li_id.startswith("footnote-"):
+            num = li_id[len("footnote-"):]
+        else:
+            # Fallback: detect by back-link <a href="#footnote-ref-N">
+            for back_a in li.find_all("a"):
+                m = _footnote_back_re.search(back_a.get("href", ""))
+                if m:
+                    num = m.group(1)
+                    break
+        if num:
+            footnote_lis_found = True
+            # Remove back-links
+            for back_a in li.find_all("a"):
+                if _footnote_back_re.search(back_a.get("href", "")):
+                    back_a.decompose()
+            text = li.get_text().strip()
+            p = soup.new_tag("p")
+            p.string = f"[^{num}]: {text}"
+            li.replace_with(p)
+
+    # Remove <hr> before footnote <ol> (the separator)
+    if footnote_lis_found:
+        for hr in soup.find_all("hr"):
+            next_sib = hr.find_next_sibling()
+            if next_sib and next_sib.name == "ol":
+                hr.decompose()
+
+    # 5. Transform ac:layout → div[data-layout-macro]
+    for layout in soup.find_all("ac:layout"):
+        layout_div = soup.new_tag("div")
+        layout_div["data-layout-macro"] = "layout"
+        section = layout.find("ac:layout-section")
+        if section:
+            layout_type = section.get("ac:type", "single")
+            # Convert underscores back to hyphens
+            layout_type = layout_type.replace("_", "-")
+            layout_div["data-layout-type"] = layout_type
+            for cell in section.find_all("ac:layout-cell", recursive=False):
+                cell_div = soup.new_tag("div")
+                cell_div["data-layout-macro"] = "cell"
+                for child in list(cell.children):
+                    cell_div.append(child.extract())
+                layout_div.append(cell_div)
+        layout.replace_with(layout_div)
+
+    # 6. Transform ac:link → a
     for link in soup.find_all("ac:link"):
         a = soup.new_tag("a")
 

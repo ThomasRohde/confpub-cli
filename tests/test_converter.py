@@ -248,3 +248,174 @@ class TestExtractH1Title:
     def test_h2_before_h1(self):
         md = "## Intro\n\n# Main Title"
         assert extract_h1_title(md) == "Main Title"
+
+
+class TestTaskLists:
+    def test_unchecked_task(self):
+        result = convert_markdown("- [ ] Buy milk")
+        assert "<ac:task-list>" in result
+        assert "<ac:task>" in result
+        assert "<ac:task-status>incomplete</ac:task-status>" in result
+        assert "Buy milk" in result
+        assert "</ac:task-body></ac:task>" in result
+        assert "</ac:task-list>" in result
+
+    def test_checked_task(self):
+        result = convert_markdown("- [x] Buy milk")
+        assert "<ac:task-status>complete</ac:task-status>" in result
+
+    def test_mixed_task_list(self):
+        md = "- [ ] First\n- [x] Second\n- [ ] Third"
+        result = convert_markdown(md)
+        assert result.count("<ac:task>") == 3
+        assert "<ac:task-status>incomplete</ac:task-status>" in result
+        assert "<ac:task-status>complete</ac:task-status>" in result
+
+    def test_task_ids_increment(self):
+        md = "- [ ] A\n- [ ] B\n- [ ] C"
+        result = convert_markdown(md)
+        assert "<ac:task-id>1</ac:task-id>" in result
+        assert "<ac:task-id>2</ac:task-id>" in result
+        assert "<ac:task-id>3</ac:task-id>" in result
+
+    def test_regular_list_unchanged(self):
+        result = convert_markdown("- Normal item\n- Another item")
+        assert "<ul>" in result
+        assert "<li>" in result
+        assert "<ac:task" not in result
+
+    def test_no_input_checkbox_in_output(self):
+        result = convert_markdown("- [ ] Task")
+        assert "<input" not in result
+
+
+class TestMath:
+    def test_inline_math(self):
+        result = convert_markdown("The equation $E=mc^2$ is famous.")
+        assert '<ac:structured-macro ac:name="mathinline">' in result
+        assert "<![CDATA[E=mc^2]]>" in result
+        assert "</ac:structured-macro>" in result
+
+    def test_block_math(self):
+        result = convert_markdown("$$\nx^2 + y^2 = z^2\n$$")
+        assert '<ac:structured-macro ac:name="mathblock">' in result
+        assert "x^2 + y^2 = z^2" in result
+
+    def test_inline_math_in_paragraph(self):
+        result = convert_markdown("Given $a$ and $b$, compute $a+b$.")
+        assert result.count('ac:name="mathinline"') == 3
+
+
+class TestDefinitionLists:
+    def test_basic_deflist(self):
+        md = "Term\n:   Definition here"
+        result = convert_markdown(md)
+        assert "<dl>" in result
+        assert "<dt>" in result
+        assert "Term" in result
+        assert "<dd>" in result
+        assert "Definition here" in result
+        assert "</dl>" in result
+
+    def test_multiple_terms(self):
+        md = "Apple\n:   A fruit\n\nBanana\n:   Another fruit"
+        result = convert_markdown(md)
+        assert result.count("<dt>") == 2
+        assert result.count("<dd>") == 2
+
+    def test_multiple_definitions(self):
+        md = "Term\n:   First def\n:   Second def"
+        result = convert_markdown(md)
+        assert result.count("<dd>") == 2
+
+
+class TestFootnotes:
+    def test_footnote_ref_link(self):
+        md = "Text with a footnote[^1].\n\n[^1]: Footnote content."
+        result = convert_markdown(md)
+        assert '<sup><a id="footnote-ref-1" href="#footnote-1">[1]</a></sup>' in result
+
+    def test_footnote_body(self):
+        md = "Text[^1].\n\n[^1]: Footnote content."
+        result = convert_markdown(md)
+        assert '<li id="footnote-1">' in result
+        assert "Footnote content." in result
+
+    def test_footnote_back_link(self):
+        md = "Text[^1].\n\n[^1]: Footnote content."
+        result = convert_markdown(md)
+        assert 'href="#footnote-ref-1"' in result
+        assert "\u21a9" in result
+
+    def test_multiple_footnotes(self):
+        md = "First[^1] and second[^2].\n\n[^1]: Note one.\n[^2]: Note two."
+        result = convert_markdown(md)
+        assert "footnote-1" in result
+        assert "footnote-2" in result
+        assert result.count("<ac:task") == 0  # no task contamination
+
+
+class TestFrontMatter:
+    def test_front_matter_stripped(self):
+        md = "---\ntitle: My Page\ntags: [a, b]\n---\n\n# Hello"
+        result = convert_markdown(md)
+        assert "title:" not in result
+        assert "tags:" not in result
+        assert "<h1>" in result
+        assert "Hello" in result
+
+    def test_no_regression_without_front_matter(self):
+        result = convert_markdown("# Hello\n\nWorld")
+        assert "<h1>" in result
+        assert "Hello" in result
+        assert "World" in result
+
+
+class TestContainerPanel:
+    def test_panel_with_title(self):
+        md = "::: panel Important Note\nThis is panel content.\n:::"
+        result = convert_markdown(md)
+        assert '<ac:structured-macro ac:name="panel">' in result
+        assert '<ac:parameter ac:name="title">Important Note</ac:parameter>' in result
+        assert "<ac:rich-text-body>" in result
+        assert "This is panel content." in result
+        assert "</ac:rich-text-body></ac:structured-macro>" in result
+
+    def test_panel_without_title(self):
+        md = "::: panel\nJust content.\n:::"
+        result = convert_markdown(md)
+        assert '<ac:structured-macro ac:name="panel">' in result
+        assert 'ac:name="title"' not in result
+        assert "Just content." in result
+
+
+class TestContainerExpand:
+    def test_expand_with_title(self):
+        md = "::: expand Click to expand\nHidden content here.\n:::"
+        result = convert_markdown(md)
+        assert '<ac:structured-macro ac:name="expand">' in result
+        assert '<ac:parameter ac:name="title">Click to expand</ac:parameter>' in result
+        assert "Hidden content here." in result
+
+
+class TestContainerLayout:
+    def test_two_equal_layout(self):
+        md = ":::: layout two-equal\n::: cell\nLeft column\n:::\n::: cell\nRight column\n:::\n::::"
+        result = convert_markdown(md)
+        assert '<ac:layout><ac:layout-section ac:type="two_equal">' in result
+        assert "<ac:layout-cell>" in result
+        assert "Left column" in result
+        assert "Right column" in result
+        assert "</ac:layout-cell>" in result
+        assert "</ac:layout-section></ac:layout>" in result
+
+    def test_single_column_layout(self):
+        md = ":::: layout single\n::: cell\nOnly column\n:::\n::::"
+        result = convert_markdown(md)
+        assert 'ac:type="single"' in result
+
+    def test_three_column_layout(self):
+        md = ":::: layout three-equal\n::: cell\nA\n:::\n::: cell\nB\n:::\n::: cell\nC\n:::\n::::"
+        result = convert_markdown(md)
+        assert 'ac:type="three_equal"' in result
+        assert result.count("<ac:layout-cell>") == 3
