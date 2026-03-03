@@ -22,6 +22,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 ENV_URL = "CONFPUB_URL"
 ENV_TOKEN = "CONFPUB_TOKEN"
 ENV_USER = "CONFPUB_USER"
+ENV_SSL_VERIFY = "CONFPUB_SSL_VERIFY"
 
 
 class ConfigModel(BaseModel):
@@ -30,6 +31,7 @@ class ConfigModel(BaseModel):
     base_url: Optional[str] = None
     user: Optional[str] = None
     token: Optional[str] = None
+    ssl_verify: Optional[str] = None
 
 
 class ResolvedConfig:
@@ -41,11 +43,13 @@ class ResolvedConfig:
         user: str | None = None,
         token: str | None = None,
         token_source: str | None = None,
+        ssl_verify: bool | str = False,
     ) -> None:
         self.base_url = base_url
         self.user = user
         self.token = token
         self.token_source = token_source
+        self.ssl_verify = ssl_verify
 
     @property
     def is_cloud(self) -> bool:
@@ -128,10 +132,28 @@ def _try_keyring(service: str, username: str) -> str | None:
         return None
 
 
+def _resolve_ssl_verify(raw: str | None) -> bool | str:
+    """Parse an ssl_verify value into bool or CA-bundle path.
+
+    Accepts "true"/"false" (case-insensitive) or a filesystem path.
+    Returns False (default) when *raw* is None or empty.
+    """
+    if not raw:
+        return False
+    lower = raw.strip().lower()
+    if lower == "true":
+        return True
+    if lower == "false":
+        return False
+    # Treat as CA bundle path
+    return raw.strip()
+
+
 def load_config(
     cli_url: str | None = None,
     cli_user: str | None = None,
     cli_token: str | None = None,
+    cli_ssl_verify: str | None = None,
 ) -> ResolvedConfig:
     """Resolve config using precedence: CLI → env → file → keychain."""
     file_cfg = _load_config_file()
@@ -142,6 +164,10 @@ def load_config(
     user = cli_user or os.environ.get(ENV_USER) or file_cfg.user
     # Token
     token = cli_token or os.environ.get(ENV_TOKEN) or file_cfg.token
+
+    # SSL verification
+    ssl_raw = cli_ssl_verify or os.environ.get(ENV_SSL_VERIFY) or file_cfg.ssl_verify
+    ssl_verify = _resolve_ssl_verify(ssl_raw)
 
     # Determine source
     token_source = None
@@ -164,6 +190,7 @@ def load_config(
         user=user,
         token=token,
         token_source=token_source,
+        ssl_verify=ssl_verify,
     )
 
 
@@ -178,11 +205,13 @@ def set_config_value(key: str, value: str) -> None:
         cfg.user = value
     elif key == "token":
         cfg.token = value
+    elif key == "ssl_verify":
+        cfg.ssl_verify = value
     else:
         from confpub.errors import ERR_VALIDATION_REQUIRED, validation_error
         raise validation_error(
             ERR_VALIDATION_REQUIRED,
-            f"Unknown config key: {key}. Valid keys: base_url, user, token",
+            f"Unknown config key: {key}. Valid keys: base_url, user, token, ssl_verify",
         )
 
     CONFIG_FILE.write_text(json.dumps(cfg.model_dump(exclude_none=True), indent=2), encoding="utf-8")

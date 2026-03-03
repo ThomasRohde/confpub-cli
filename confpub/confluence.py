@@ -48,6 +48,15 @@ class ConfluenceClient:
             kwargs["cloud"] = True
         else:
             kwargs["token"] = config.token
+
+        kwargs["verify_ssl"] = config.ssl_verify
+
+        # Suppress noisy per-request InsecureRequestWarning when SSL
+        # verification is disabled (common in corporate environments).
+        if not config.ssl_verify:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
         return Confluence(**kwargs)
 
     def _handle_error(self, exc: Exception, context: str = "") -> None:
