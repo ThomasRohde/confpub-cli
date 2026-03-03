@@ -197,13 +197,13 @@ class TestLists:
 class TestUnknownMacros:
     def test_unknown_macro_becomes_comment(self):
         html = (
-            '<ac:structured-macro ac:name="jira">'
+            '<ac:structured-macro ac:name="custom-widget">'
             '<ac:parameter ac:name="key">PROJ-123</ac:parameter>'
             '</ac:structured-macro>'
         )
         result = convert_storage_to_markdown(html)
-        assert "<!-- confluence-macro: jira" in result.markdown
-        assert "jira" in result.unknown_macros
+        assert "<!-- confluence-macro: custom-widget" in result.markdown
+        assert "custom-widget" in result.unknown_macros
         assert len(result.warnings) > 0
 
     def test_multiple_unknown_macros(self):

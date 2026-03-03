@@ -1,10 +1,21 @@
 {
   "schema_version": "1.0",
-  "last_updated": "2026-03-01T04:25:42.552558+00:00",
+  "last_updated": "2026-03-03T16:40:52.673228+00:00",
   "pages": {
     "confpub README": {
       "page_id": "425999",
-      "version": 5
+      "version": 5,
+      "content_fingerprint": null
+    },
+    "Plugin Feature Test Page": {
+      "page_id": "1146882",
+      "version": 1,
+      "content_fingerprint": "6168809b83c54882ee3f2efb10a8a93f3ad7bd9f9a440dcc0a9d6f4131a020ff"
+    },
+    "Confluence Macro Test Page": {
+      "page_id": "1310721",
+      "version": 1,
+      "content_fingerprint": "30452e1ec4d97116b402f4137bdc30f66b60ece794374f91e5ced8d4d803286f"
     }
   }
 }

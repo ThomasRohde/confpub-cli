@@ -77,7 +77,7 @@ confpub plan apply --plan confpub-plan.json --dry-run
 
 - **Structured JSON output** — every command returns the same envelope shape on stdout
 - **Transactional workflow** — plan → validate → apply → verify with fingerprint-based conflict detection
-- **Markdown → Confluence** — code blocks become code macros, `> [!NOTE]` becomes Info panels, tables stay tables, task lists, math, definition lists, footnotes, panels, expand/collapse, and page layouts
+- **Markdown → Confluence** — code blocks become code macros, `> [!NOTE]` becomes Info panels, tables stay tables, task lists, math, definition lists, footnotes, panels, expand/collapse, page layouts, and `{macro}` syntax for Status, TOC, Jira, Anchor, Children, and more
 - **Asset handling** — images are uploaded as attachments and URLs are rewritten automatically
 - **Idempotent** — a lockfile tracks page IDs so re-publishing updates in place
 - **Agent-ready** — `confpub guide` returns the full CLI schema; `LLM=true` suppresses interactive behavior
@@ -312,6 +312,15 @@ confpub converts Markdown to Confluence Storage Format (and back via `page pull`
 | `::: expand Title` | Confluence Expand macro |
 | `:::: layout two-equal` | Confluence page layout |
 | `---yaml---` front matter | Silently stripped |
+| `{status:Done\|colour=Green}` | Confluence Status lozenge |
+| `{toc}` | Table of Contents macro |
+| `{anchor:name}` | Anchor macro |
+| `{children}` | Children Display macro |
+| `{jira:PROJECT-123}` | Jira issue link/table |
+| `{recently-updated}` | Recently Updated macro |
+| `{excerpt-include:Page}` | Excerpt Include macro |
+| `{include:Page}` | Include Page macro |
+| `::: excerpt` | Excerpt macro (body) |
 
 ---
 

@@ -22,6 +22,8 @@ from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.front_matter import front_matter_plugin
 from mdit_py_plugins.container import container_plugin
 
+from confpub.macro_plugin import confluence_macro_plugin
+
 # Admonition types mapping: GitHub [!TYPE] → Confluence macro name
 ADMONITION_MAP: dict[str, str] = {
     "NOTE": "info",
@@ -558,6 +560,136 @@ class ConfluenceRenderer:
         self._output.append("</ac:layout-cell>")
         return idx + 1
 
+    # ------------------------------------------------------------------
+    # Container: excerpt
+    # ------------------------------------------------------------------
+
+    def _render_container_excerpt_open(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        info = tokens[idx].info.strip() if tokens[idx].info else ""
+        # info is e.g. "excerpt hidden" — strip the container name prefix
+        rest = info[len("excerpt"):].strip() if info.startswith("excerpt") else info
+        self._output.append('<ac:structured-macro ac:name="excerpt">')
+        if "hidden" in rest.lower():
+            self._output.append('<ac:parameter ac:name="hidden">true</ac:parameter>')
+        self._output.append("<ac:rich-text-body>")
+        return idx + 1
+
+    def _render_container_excerpt_close(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        self._output.append("</ac:rich-text-body></ac:structured-macro>")
+        return idx + 1
+
+    # ------------------------------------------------------------------
+    # Confluence macros (body-less, from macro_plugin.py)
+    # ------------------------------------------------------------------
+
+    def _render_confluence_macro(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        """Block-level macro token."""
+        token = tokens[idx]
+        name = token.info
+        meta = token.meta or {}
+        self._output.append(self._emit_macro(name, meta.get("positional", ""), meta.get("params", {})))
+        return idx + 1
+
+    def _inline_confluence_macro(self, token: Token) -> None:
+        """Inline macro token."""
+        name = token.info
+        meta = token.meta or {}
+        self._output.append(self._emit_macro(name, meta.get("positional", ""), meta.get("params", {})))
+
+    def _emit_macro(self, name: str, positional: str, params: dict[str, str]) -> str:
+        """Dispatch to per-macro handler or fall back to generic."""
+        method_name = f"_macro_{name.replace('-', '_')}"
+        handler = getattr(self, method_name, None)
+        if handler:
+            return handler(positional, params)
+        return self._emit_generic_macro(name, positional, params)
+
+    def _emit_generic_macro(self, name: str, positional: str, params: dict[str, str]) -> str:
+        parts = [f'<ac:structured-macro ac:name="{escape(name)}">']
+        if positional:
+            parts.append(f'<ac:parameter ac:name="">{escape(positional)}</ac:parameter>')
+        for k, v in params.items():
+            parts.append(f'<ac:parameter ac:name="{escape(k)}">{escape(v)}</ac:parameter>')
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
+    def _macro_status(self, positional: str, params: dict[str, str]) -> str:
+        parts = ['<ac:structured-macro ac:name="status">']
+        if positional:
+            parts.append(f'<ac:parameter ac:name="title">{escape(positional)}</ac:parameter>')
+        for k, v in params.items():
+            parts.append(f'<ac:parameter ac:name="{escape(k)}">{escape(v)}</ac:parameter>')
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
+    def _macro_toc(self, positional: str, params: dict[str, str]) -> str:
+        parts = ['<ac:structured-macro ac:name="toc">']
+        for k, v in params.items():
+            parts.append(f'<ac:parameter ac:name="{escape(k)}">{escape(v)}</ac:parameter>')
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
+    def _macro_anchor(self, positional: str, params: dict[str, str]) -> str:
+        parts = ['<ac:structured-macro ac:name="anchor">']
+        if positional:
+            parts.append(f'<ac:parameter ac:name="">{escape(positional)}</ac:parameter>')
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
+    def _macro_children(self, positional: str, params: dict[str, str]) -> str:
+        parts = ['<ac:structured-macro ac:name="children">']
+        for k, v in params.items():
+            parts.append(f'<ac:parameter ac:name="{escape(k)}">{escape(v)}</ac:parameter>')
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
+    def _macro_jira(self, positional: str, params: dict[str, str]) -> str:
+        parts = ['<ac:structured-macro ac:name="jira">']
+        if "jql" in params or "jqlQuery" in params:
+            jql_value = params.pop("jql", "") or params.pop("jqlQuery", "")
+            parts.append(f'<ac:parameter ac:name="jqlQuery">{escape(jql_value)}</ac:parameter>')
+        elif positional:
+            parts.append(f'<ac:parameter ac:name="key">{escape(positional)}</ac:parameter>')
+        for k, v in params.items():
+            parts.append(f'<ac:parameter ac:name="{escape(k)}">{escape(v)}</ac:parameter>')
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
+    def _macro_recently_updated(self, positional: str, params: dict[str, str]) -> str:
+        parts = ['<ac:structured-macro ac:name="recently-updated">']
+        for k, v in params.items():
+            parts.append(f'<ac:parameter ac:name="{escape(k)}">{escape(v)}</ac:parameter>')
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
+    def _macro_excerpt_include(self, positional: str, params: dict[str, str]) -> str:
+        space = params.pop("space", "")
+        parts = ['<ac:structured-macro ac:name="excerpt-include">']
+        parts.append('<ac:parameter ac:name="">')
+        ri_attrs = f'ri:content-title="{escape(positional)}"'
+        if space:
+            ri_attrs += f' ri:space-key="{escape(space)}"'
+        parts.append(f"<ac:link><ri:page {ri_attrs} /></ac:link>")
+        parts.append("</ac:parameter>")
+        for k, v in params.items():
+            parts.append(f'<ac:parameter ac:name="{escape(k)}">{escape(v)}</ac:parameter>')
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
+    def _macro_include(self, positional: str, params: dict[str, str]) -> str:
+        space = params.pop("space", "")
+        parts = ['<ac:structured-macro ac:name="include">']
+        parts.append('<ac:parameter ac:name="">')
+        ri_attrs = f'ri:content-title="{escape(positional)}"'
+        if space:
+            ri_attrs += f' ri:space-key="{escape(space)}"'
+        parts.append(f"<ac:link><ri:page {ri_attrs} /></ac:link>")
+        parts.append("</ac:parameter>")
+        for k, v in params.items():
+            parts.append(f'<ac:parameter ac:name="{escape(k)}">{escape(v)}</ac:parameter>')
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
 
 def _create_parser() -> MarkdownIt:
     """Create a configured markdown-it-py parser."""
@@ -574,6 +706,8 @@ def _create_parser() -> MarkdownIt:
     container_plugin(md, name="expand")
     container_plugin(md, name="layout")
     container_plugin(md, name="cell")
+    container_plugin(md, name="excerpt")
+    confluence_macro_plugin(md)
     return md
 
 

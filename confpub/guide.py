@@ -406,12 +406,23 @@ def build_guide() -> dict[str, Any]:
                 "panels":         "::: panel Title\\ncontent\\n::: → ac:structured-macro panel",
                 "expand":         "::: expand Title\\ncontent\\n::: → ac:structured-macro expand",
                 "layouts":        ":::: layout two-equal\\n::: cell\\n...\\n::::\\n → ac:layout with ac:layout-section",
+                "status":           "{status:Title|colour=Color} → ac:structured-macro status",
+                "toc":              "{toc} / {toc:maxLevel=N} → ac:structured-macro toc",
+                "anchor":           "{anchor:name} → ac:structured-macro anchor",
+                "children":         "{children} / {children:depth=N} → ac:structured-macro children",
+                "jira":             "{jira:KEY-123} / {jira:jql=...} → ac:structured-macro jira",
+                "recently_updated": "{recently-updated} → ac:structured-macro recently-updated",
+                "excerpt_include":  "{excerpt-include:Page Title} → ac:structured-macro excerpt-include",
+                "include_page":     "{include:Page Title} → ac:structured-macro include",
+                "excerpt":          "::: excerpt hidden\\ncontent\\n::: → ac:structured-macro excerpt",
             },
             "layout_types": ["single", "two-equal", "two-left-sidebar", "two-right-sidebar", "three-equal", "three-with-sidebars"],
             "agent_hint": (
                 "All features are always-on — the parser simply ignores syntax that isn't used. "
                 "Math macros require the Confluence LaTeX Math plugin to be installed on the server. "
-                "Layouts use :::: (4 colons) for the outer layout block and ::: (3 colons) for inner cells."
+                "Layouts use :::: (4 colons) for the outer layout block and ::: (3 colons) for inner cells. "
+                "Use {macro-name:params} for body-less Confluence macros. "
+                "Macros on their own line become block-level (no <p> wrapping)."
             ),
         },
         "assertions": {

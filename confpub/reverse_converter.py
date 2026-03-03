@@ -98,6 +98,18 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
             return self._convert_panel_macro(el)
         if macro_name == "expand":
             return self._convert_expand_macro(el)
+        if macro_name == "status":
+            return self._convert_status_macro(el)
+        if macro_name in ("toc", "children", "recently-updated"):
+            return self._convert_simple_macro(el, macro_name)
+        if macro_name == "anchor":
+            return self._convert_anchor_macro(el)
+        if macro_name == "jira":
+            return self._convert_jira_macro(el)
+        if macro_name in ("excerpt-include", "include"):
+            return self._convert_page_ref_macro(el, macro_name)
+        if macro_name == "excerpt":
+            return self._convert_excerpt_macro(el)
         # Unknown macro
         self._unknown_macros.append(macro_name)
         self._warnings.append(f"Unknown macro '{macro_name}' converted to HTML comment")
@@ -174,6 +186,92 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
         return f"\n\n> [!{admonition_type}]\n{quoted}\n\n"
 
     # ------------------------------------------------------------------
+    # Confluence macro helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_macro_params(el: Tag) -> dict[str, str]:
+        """Parse ``data-macro-params`` semicolon-delimited string into dict."""
+        raw = str(el.get("data-macro-params", "") or "")
+        if not raw:
+            return {}
+        params: dict[str, str] = {}
+        for part in raw.split("; "):
+            if "=" in part:
+                key, _, value = part.partition("=")
+                params[key] = value
+        return params
+
+    @staticmethod
+    def _build_macro_syntax(
+        name: str,
+        positional: str,
+        params: dict[str, str],
+        is_block: bool,
+    ) -> str:
+        """Reconstruct ``{name:pos|k=v}`` string."""
+        segments: list[str] = []
+        if positional:
+            segments.append(positional)
+        for k, v in params.items():
+            segments.append(f"{k}={v}")
+        if segments:
+            inner = f"{name}:{"|".join(segments)}"
+        else:
+            inner = name
+        syntax = "{" + inner + "}"
+        if is_block:
+            return f"\n\n{syntax}\n\n"
+        return syntax
+
+    def _convert_status_macro(self, el: Tag) -> str:
+        params = self._extract_macro_params(el)
+        positional = params.pop("title", "")
+        is_block = el.name != "span"
+        return self._build_macro_syntax("status", positional, params, is_block)
+
+    def _convert_simple_macro(self, el: Tag, macro_name: str) -> str:
+        params = self._extract_macro_params(el)
+        is_block = el.name != "span"
+        return self._build_macro_syntax(macro_name, "", params, is_block)
+
+    def _convert_anchor_macro(self, el: Tag) -> str:
+        params = self._extract_macro_params(el)
+        positional = params.pop("", "")
+        is_block = el.name != "span"
+        return self._build_macro_syntax("anchor", positional, params, is_block)
+
+    def _convert_jira_macro(self, el: Tag) -> str:
+        params = self._extract_macro_params(el)
+        positional = ""
+        if "key" in params:
+            positional = params.pop("key")
+        elif "jqlQuery" in params:
+            params["jql"] = params.pop("jqlQuery")
+        is_block = el.name != "span"
+        return self._build_macro_syntax("jira", positional, params, is_block)
+
+    def _convert_page_ref_macro(self, el: Tag, macro_name: str) -> str:
+        page_title = str(el.get("data-macro-page-title", "") or "")
+        space_key = str(el.get("data-macro-space-key", "") or "")
+        params: dict[str, str] = {}
+        if space_key:
+            params["space"] = space_key
+        is_block = el.name != "span"
+        return self._build_macro_syntax(macro_name, page_title, params, is_block)
+
+    def _convert_excerpt_macro(self, el: Tag) -> str:
+        params = self._extract_macro_params(el)
+        hidden = params.get("hidden", "").lower() == "true"
+        body_el = el.find("div", class_="confluence-rich-text-body")
+        if body_el:
+            body_text = self.convert(str(body_el)).strip()
+        else:
+            body_text = el.get_text().strip()
+        header = "excerpt hidden" if hidden else "excerpt"
+        return f"\n\n::: {header}\n{body_text}\n:::\n\n"
+
+    # ------------------------------------------------------------------
     # Image handling (pre-processed from ac:image)
     # ------------------------------------------------------------------
 
@@ -218,7 +316,7 @@ def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
 
     # Inline macro names that should become <span> not <div> to preserve
     # surrounding whitespace when markdownify processes them.
-    _INLINE_MACROS = {"mathinline"}
+    _INLINE_MACROS = {"mathinline", "status", "anchor", "jira"}
 
     # 1. Transform ac:structured-macro → div/span[data-confluence-macro]
     for macro in soup.find_all("ac:structured-macro"):
@@ -229,12 +327,26 @@ def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
 
         # Extract parameters
         params: dict[str, str] = {}
+        page_ref_title = ""
+        page_ref_space = ""
         for param in macro.find_all("ac:parameter"):
             param_name = param.get("ac:name", "")
-            param_value = param.get_text()
-            params[param_name] = param_value
+            # Detect ri:page inside parameter (excerpt-include, include)
+            ri_page = param.find("ri:page")
+            if ri_page:
+                page_ref_title = ri_page.get("ri:content-title", "")
+                page_ref_space = ri_page.get("ri:space-key", "")
+                params[param_name] = page_ref_title
+            else:
+                param_value = param.get_text()
+                params[param_name] = param_value
             if param_name == "language":
-                div["data-macro-language"] = param_value
+                div["data-macro-language"] = param.get_text()
+
+        if page_ref_title:
+            div["data-macro-page-title"] = page_ref_title
+        if page_ref_space:
+            div["data-macro-space-key"] = page_ref_space
 
         if params:
             div["data-macro-params"] = "; ".join(f"{k}={v}" for k, v in params.items())
