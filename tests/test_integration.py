@@ -551,3 +551,105 @@ class TestEnvelopeContract:
         assert isinstance(data["metrics"], dict)
         assert "duration_ms" in data["metrics"]
         assert data["request_id"].startswith("req_")
+
+
+class TestPagePublishFrontMatter:
+    """Front-matter provides defaults for page publish."""
+
+    def test_front_matter_provides_space_and_parent(self, tmp_path, monkeypatch):
+        """Front-matter space/parent used when no CLI flags given."""
+        md = "---\ntitle: FM Page\nspace: DEV\nparent: Docs\n---\n\n# Content"
+        md_file = tmp_path / "page.md"
+        md_file.write_text(md)
+
+        from confpub.confluence import ConfluenceClient
+        from unittest.mock import MagicMock
+
+        mock_client = MagicMock()
+        mock_client.get_page.return_value = None
+        mock_client.create_page.return_value = {"id": "new_1", "version": {"number": 1}}
+        mock_client.get_attachments.return_value = []
+
+        monkeypatch.setattr("confpub.publish.load_config", lambda: MagicMock())
+        monkeypatch.setattr("confpub.publish.ConfluenceClient", lambda cfg: mock_client)
+
+        result = runner.invoke(app, ["page", "publish", str(md_file)])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        assert data["result"]["changes"][0]["title"] == "FM Page"
+
+    def test_cli_flags_override_front_matter(self, tmp_path, monkeypatch):
+        """CLI flags take precedence over front-matter values."""
+        md = "---\ntitle: FM Title\nspace: FMSPACE\nparent: FM Parent\n---\n\n# Content"
+        md_file = tmp_path / "page.md"
+        md_file.write_text(md)
+
+        from unittest.mock import MagicMock
+
+        mock_client = MagicMock()
+        mock_client.get_page.return_value = None
+        mock_client.create_page.return_value = {"id": "new_2", "version": {"number": 1}}
+        mock_client.get_attachments.return_value = []
+
+        monkeypatch.setattr("confpub.publish.load_config", lambda: MagicMock())
+        monkeypatch.setattr("confpub.publish.ConfluenceClient", lambda cfg: mock_client)
+
+        result = runner.invoke(app, [
+            "page", "publish", str(md_file),
+            "--space", "CLISPACE",
+            "--parent", "CLI Parent",
+            "--title", "CLI Title",
+        ])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        assert data["result"]["changes"][0]["title"] == "CLI Title"
+        # Verify the CLI space was used (passed to create_page)
+        call_args = mock_client.create_page.call_args
+        assert call_args[0][0] == "CLISPACE"
+
+    def test_labels_merge_cli_and_front_matter(self, tmp_path, monkeypatch):
+        """CLI labels and front-matter labels are merged (deduplicated)."""
+        md = "---\nspace: DEV\nparent: Docs\nlabels:\n  - fm1\n  - shared\n---\n\nContent"
+        md_file = tmp_path / "page.md"
+        md_file.write_text(md)
+
+        from unittest.mock import MagicMock
+
+        mock_client = MagicMock()
+        mock_client.get_page.return_value = None
+        mock_client.create_page.return_value = {"id": "new_3", "version": {"number": 1}}
+        mock_client.get_attachments.return_value = []
+        mock_client.set_labels.return_value = []
+
+        monkeypatch.setattr("confpub.publish.load_config", lambda: MagicMock())
+        monkeypatch.setattr("confpub.publish.ConfluenceClient", lambda cfg: mock_client)
+
+        result = runner.invoke(app, [
+            "page", "publish", str(md_file),
+            "--label", "cli1",
+            "--label", "shared",
+        ])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        # Labels should be merged and deduplicated
+        labels_call = mock_client.set_labels.call_args[0][1]
+        assert "cli1" in labels_call
+        assert "fm1" in labels_call
+        assert "shared" in labels_call
+        # No duplicates
+        assert len(labels_call) == len(set(labels_call))
+
+    def test_no_front_matter_existing_behavior(self, tmp_path):
+        """Without front-matter, missing --space still raises an error."""
+        md = "# Plain Page\n\nNo front-matter here."
+        md_file = tmp_path / "plain.md"
+        md_file.write_text(md)
+
+        result = runner.invoke(app, ["page", "publish", str(md_file)])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert "space" in data["errors"][0]["message"].lower()

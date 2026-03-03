@@ -138,12 +138,12 @@ def build_guide() -> dict[str, Any]:
                 "description": "Publish a single Markdown file to Confluence",
                 "flags": ["--space", "--parent", "--title", "--title-from-h1", "--page-id", "--dry-run", "--backup", "--label"],
                 "agent_hint": (
-                    "Title precedence: explicit --title > --title-from-h1 (first H1 heading) > filename inference. "
-                    "When --title is omitted, the title is inferred from the filename: "
-                    "the stem is extracted, hyphens and underscores are replaced with spaces, "
-                    "and the result is title-cased. E.g. 'my-cool-page.md' → 'My Cool Page'. "
-                    "Use --title-from-h1 to extract the title from the first # heading in the file. "
-                    "Use --label to apply labels (repeatable): --label api --label docs. "
+                    "Title precedence: explicit --title > --title-from-h1 > front-matter title > filename inference. "
+                    "Space precedence: --space > front-matter space > CONFPUB_SPACE env var. "
+                    "Parent precedence: --parent > front-matter parent. "
+                    "Labels: CLI --label merged with front-matter labels (union, deduplicated). "
+                    "When writing Markdown files for publication, include YAML front-matter to embed metadata: "
+                    "---\\ntitle: Page Title\\nspace: SPACEKEY\\nparent: Parent Title\\nlabels:\\n  - tag1\\n---\\n "
                     "For personal spaces, quote the tilde: --space '~username' "
                     "(PowerShell expands unquoted ~). Or set CONFPUB_SPACE env var."
                 ),
@@ -402,7 +402,11 @@ def build_guide() -> dict[str, Any]:
                 "math_block":     "$$...$$ → ac:structured-macro mathblock",
                 "definition_lists": "Term\\n: Definition → <dl><dt><dd>",
                 "footnotes":      "[^1] + [^1]: text → superscript links with numbered list",
-                "front_matter":   "---\\nyaml\\n--- → silently stripped",
+                "front_matter": (
+                    "---\\nyaml\\n--- → extracted for page metadata "
+                    "(title, space, parent, labels, page_id); "
+                    "used by page.publish; ignored when a manifest is used"
+                ),
                 "panels":         "::: panel Title\\ncontent\\n::: → ac:structured-macro panel",
                 "expand":         "::: expand Title\\ncontent\\n::: → ac:structured-macro expand",
                 "layouts":        ":::: layout two-equal\\n::: cell\\n...\\n::::\\n → ac:layout with ac:layout-section",
@@ -423,6 +427,47 @@ def build_guide() -> dict[str, Any]:
                 "Layouts use :::: (4 colons) for the outer layout block and ::: (3 colons) for inner cells. "
                 "Use {macro-name:params} for body-less Confluence macros. "
                 "Macros on their own line become block-level (no <p> wrapping)."
+            ),
+        },
+        "front_matter": {
+            "description": (
+                "YAML front-matter in Markdown files provides default page metadata for page.publish. "
+                "When a manifest (confpub.yaml) is used, front-matter is ignored entirely."
+            ),
+            "fields": {
+                "title": "Page title (string)",
+                "space": "Confluence space key (string)",
+                "parent": "Parent page title (string)",
+                "labels": "Labels to apply (list of strings, or single string)",
+                "page_id": "Confluence page ID for direct update (string or integer)",
+            },
+            "precedence": {
+                "title": "--title > --title-from-h1 > front-matter > filename",
+                "space": "--space > front-matter > CONFPUB_SPACE",
+                "parent": "--parent > front-matter",
+                "page_id": "--page-id > front-matter",
+                "labels": "CLI --label + front-matter labels merged (deduplicated)",
+            },
+            "example": (
+                "---\n"
+                "title: API Reference\n"
+                "space: DEV\n"
+                "parent: Documentation\n"
+                "labels:\n"
+                "  - api\n"
+                "  - public\n"
+                "---\n"
+                "\n"
+                "# API Reference\n"
+                "\n"
+                "Content here..."
+            ),
+            "agent_hint": (
+                "When creating Markdown files for Confluence publication, always include "
+                "front-matter with at least title, space, and parent so the file can be "
+                "published with just `confpub page publish <file>` — no extra flags needed. "
+                "Unknown front-matter keys (e.g. draft, author) are silently ignored, "
+                "so front-matter is compatible with other tools like Jekyll or Hugo."
             ),
         },
         "assertions": {

@@ -21,19 +21,19 @@ from confpub.errors import ConfpubError, exit_code_for, ERR_INTERNAL_SDK
 from confpub.output import emit_stderr, emit_stdout, is_compact, is_verbose, set_compact, set_quiet, set_verbose
 
 
-def _resolve_space(cli_space: str | None, required: bool = False) -> str | None:
-    """Resolve space from CLI flag or CONFPUB_SPACE env var, with validation."""
+def _resolve_space(cli_space: str | None, required: bool = False, fm_space: str | None = None) -> str | None:
+    """Resolve space from CLI flag, front-matter, or CONFPUB_SPACE env var, with validation."""
     from confpub.config import ENV_SPACE
     from confpub.errors import validate_space_key
 
-    space = cli_space or os.environ.get(ENV_SPACE)
+    space = cli_space or fm_space or os.environ.get(ENV_SPACE)
     if space is not None:
         validate_space_key(space)
         return space
     if required:
         raise ConfpubError(
             "ERR_VALIDATION_REQUIRED",
-            "Space key is required. Use --space or set CONFPUB_SPACE.",
+            "Space key is required. Use --space, front-matter, or set CONFPUB_SPACE.",
         )
     return None
 
@@ -290,30 +290,59 @@ def page_publish(
     label: Optional[list[str]] = typer.Option(None, "--label", help="Label to apply (repeatable)"),
 ) -> None:
     """Publish a single Markdown file to Confluence."""
+    from pathlib import Path as _Path
+    from confpub.front_matter import parse_front_matter
     from confpub.publish import derive_title
-    resolved_title = derive_title(file, title, title_from_h1=title_from_h1)
+
+    # Parse front-matter from the file (before command_context so title is resolved for target)
+    fm = None
+    source = _Path(file)
+    if source.exists():
+        md_text = source.read_text(encoding="utf-8")
+        fm = parse_front_matter(md_text)
+
+    fm_title = fm.title if fm else None
+    fm_space = fm.space if fm else None
+    fm_parent = fm.parent if fm else None
+    fm_page_id = fm.page_id if fm else None
+    fm_labels = fm.labels if fm else []
+
+    resolved_title = derive_title(file, title, title_from_h1=title_from_h1, front_matter_title=fm_title)
+
+    # Resolve page_id: CLI flag > front-matter
+    effective_page_id = page_id or fm_page_id
+
     target = {"space": space, "title": resolved_title, "file": file}
-    if page_id:
-        target["page_id"] = page_id
+    if effective_page_id:
+        target["page_id"] = effective_page_id
     with command_context("page.publish", target=target) as ctx:
-        space = _resolve_space(space, required=True)
+        space = _resolve_space(space, required=True, fm_space=fm_space)
         ctx.target["space"] = space
-        if not page_id and not parent:
+
+        # Resolve parent: CLI flag > front-matter
+        effective_parent = parent or fm_parent
+
+        if not effective_page_id and not effective_parent:
             raise ConfpubError(
                 "ERR_VALIDATION_REQUIRED",
-                "Either --page-id or --parent is required",
+                "Either --page-id or --parent is required (via flag or front-matter)",
             )
+
+        # Merge labels: CLI + front-matter (deduplicated, order-preserving)
+        cli_labels = label or []
+        merged_labels = list(dict.fromkeys(cli_labels + fm_labels))
+
         from confpub.publish import publish_page
         result = publish_page(
             file=file,
             space=space,
-            parent=parent or "",
-            title=title,
-            page_id=page_id,
+            parent=effective_parent or "",
+            title=resolved_title,
+            page_id=effective_page_id,
             dry_run=dry_run,
             backup=backup,
             progress_callback=ctx,
-            labels=label or [],
+            labels=merged_labels,
         )
         ctx.result = result
 

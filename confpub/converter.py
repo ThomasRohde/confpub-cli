@@ -13,6 +13,8 @@ import re
 from html import escape
 from typing import Any
 
+import yaml
+
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from mdit_py_plugins.tasklists import tasklists_plugin
@@ -744,6 +746,27 @@ def extract_h1_title(md_text: str) -> str | None:
                         if child.type in ("text", "code_inline"):
                             parts.append(child.content)
                     return "".join(parts) if parts else None
+    return None
+
+
+def extract_front_matter(md_text: str) -> dict[str, Any] | None:
+    """Extract YAML front-matter as a raw dict, or None.
+
+    Uses the markdown-it-py front_matter plugin to locate the block,
+    then parses with yaml.safe_load.  Returns None if no front-matter
+    is present, if the YAML is invalid, or if the result is not a mapping.
+    """
+    parser = _create_parser()
+    tokens = parser.parse(md_text)
+    for token in tokens:
+        if token.type == "front_matter":
+            try:
+                data = yaml.safe_load(token.content)
+            except yaml.YAMLError:
+                return None
+            if isinstance(data, dict):
+                return data
+            return None
     return None
 
 

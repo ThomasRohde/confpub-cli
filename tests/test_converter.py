@@ -1,6 +1,6 @@
 """Tests for confpub.converter module."""
 
-from confpub.converter import convert_markdown, extract_h1_title, fingerprint_content
+from confpub.converter import convert_markdown, extract_front_matter, extract_h1_title, fingerprint_content
 
 
 class TestHeadings:
@@ -419,3 +419,32 @@ class TestContainerLayout:
         result = convert_markdown(md)
         assert 'ac:type="three_equal"' in result
         assert result.count("<ac:layout-cell>") == 3
+
+
+class TestExtractFrontMatter:
+    def test_basic_extraction(self):
+        md = "---\ntitle: Hello\nspace: DEV\n---\n\n# Content"
+        result = extract_front_matter(md)
+        assert result is not None
+        assert result["title"] == "Hello"
+        assert result["space"] == "DEV"
+
+    def test_no_front_matter_returns_none(self):
+        md = "# Just a heading\n\nParagraph."
+        assert extract_front_matter(md) is None
+
+    def test_invalid_yaml_returns_none(self):
+        md = "---\n: invalid: yaml: {{{\n---\n\nContent"
+        assert extract_front_matter(md) is None
+
+    def test_non_mapping_returns_none(self):
+        md = "---\n- just\n- a\n- list\n---\n\nContent"
+        assert extract_front_matter(md) is None
+
+    def test_preserves_unknown_keys(self):
+        md = "---\ntitle: Page\nauthor: Alice\ndraft: true\n---\n\nContent"
+        result = extract_front_matter(md)
+        assert result is not None
+        assert result["title"] == "Page"
+        assert result["author"] == "Alice"
+        assert result["draft"] is True

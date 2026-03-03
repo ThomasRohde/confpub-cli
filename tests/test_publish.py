@@ -65,6 +65,26 @@ class TestDeriveTitle:
         assert derive_title(str(md_file), "Explicit Title", title_from_h1=True) == "Explicit Title"
 
 
+class TestDeriveTitleFrontMatter:
+    def test_front_matter_title_used_as_fallback(self):
+        assert derive_title("some-file.md", front_matter_title="FM Title") == "FM Title"
+
+    def test_cli_title_wins_over_front_matter(self):
+        assert derive_title("some-file.md", "CLI Title", front_matter_title="FM Title") == "CLI Title"
+
+    def test_h1_wins_over_front_matter(self, tmp_path):
+        md_file = tmp_path / "test.md"
+        md_file.write_text("# H1 Title\n\nContent here.")
+        result = derive_title(str(md_file), title_from_h1=True, front_matter_title="FM Title")
+        assert result == "H1 Title"
+
+    def test_front_matter_beats_filename(self):
+        assert derive_title("my-cool-page.md", front_matter_title="Better Title") == "Better Title"
+
+    def test_no_front_matter_falls_through_to_filename(self):
+        assert derive_title("my-cool-page.md", front_matter_title=None) == "My Cool Page"
+
+
 class TestPublishDryRun:
     @patch("confpub.publish.load_config")
     @patch("confpub.publish.ConfluenceClient")

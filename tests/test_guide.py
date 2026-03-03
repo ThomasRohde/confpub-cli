@@ -137,7 +137,7 @@ class TestBuildGuide:
         guide = build_guide()
         cmd = guide["commands"]["page.publish"]
         assert "agent_hint" in cmd
-        assert "title-cased" in cmd["agent_hint"]
+        assert "filename inference" in cmd["agent_hint"]
 
     def test_page_pull_has_progress_hint(self):
         guide = build_guide()

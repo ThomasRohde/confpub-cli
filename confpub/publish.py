@@ -23,10 +23,16 @@ from confpub.errors import (
 from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, update_lockfile
 
 
-def derive_title(file: str, title: str | None = None, *, title_from_h1: bool = False) -> str:
-    """Derive page title from explicit title, H1 heading, or filename.
+def derive_title(
+    file: str,
+    title: str | None = None,
+    *,
+    title_from_h1: bool = False,
+    front_matter_title: str | None = None,
+) -> str:
+    """Derive page title from explicit title, H1 heading, front-matter, or filename.
 
-    Precedence: explicit --title > --title-from-h1 > filename inference.
+    Precedence: explicit --title > --title-from-h1 > front-matter > filename inference.
     """
     if title:
         return title
@@ -36,6 +42,8 @@ def derive_title(file: str, title: str | None = None, *, title_from_h1: bool = F
         h1 = extract_h1_title(md_text)
         if h1:
             return h1
+    if front_matter_title:
+        return front_matter_title
     return Path(file).stem.replace("-", " ").replace("_", " ").title()
 
 
