@@ -9,9 +9,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
-
-import yaml
+from typing import Any, Literal
 
 from confpub.confluence import ConfluenceClient, build_client
 from confpub.output import emit_progress
@@ -21,9 +19,12 @@ from confpub.errors import (
     ERR_VALIDATION_REQUIRED,
     ConfpubError,
 )
+from confpub.front_matter import FrontMatterData
 from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, update_lockfile
 from confpub.manifest import generate_manifest_yaml
 from confpub.reverse_converter import convert_storage_to_markdown
+
+Layout = Literal["flat", "nested"]
 
 
 def _slugify(title: str) -> str:
@@ -77,15 +78,22 @@ def _collect_tree(
 def _compute_file_paths(
     pages: list[dict[str, Any]],
     output_dir: str,
-    layout: str,
+    layout: Layout,
     root_page_id: str,
-) -> dict[str, str]:
-    """Compute output file paths for each page. Returns {page_id: file_path}."""
+) -> tuple[dict[str, str], dict[str, str], dict[str, str | None]]:
+    """Compute output file paths and lookup maps for each page.
+
+    Returns (file_paths, id_to_title, id_to_parent) where:
+    - file_paths: {page_id: file_path}
+    - id_to_title: {page_id: title}
+    - id_to_parent: {page_id: parent_page_id or None}
+    """
     paths: dict[str, str] = {}
     root_slug: str | None = None
 
-    # Build parent lookup
+    # Build lookup maps
     id_to_slug: dict[str, str] = {}
+    id_to_title: dict[str, str] = {}
     id_to_parent: dict[str, str | None] = {}
 
     for entry in pages:
@@ -93,6 +101,7 @@ def _compute_file_paths(
         pid = str(page["id"])
         slug = _slugify(page.get("title", pid))
         id_to_slug[pid] = slug
+        id_to_title[pid] = page.get("title", "")
         id_to_parent[pid] = str(entry["parent_id"]) if entry["parent_id"] else None
         if pid == root_page_id:
             root_slug = slug
@@ -119,7 +128,7 @@ def _compute_file_paths(
             # Flat layout
             paths[pid] = os.path.join(output_dir, f"{slug}.md")
 
-    return paths
+    return paths, id_to_title, id_to_parent
 
 
 def _check_conflicts(file_paths: dict[str, str], force: bool) -> None:
@@ -147,7 +156,7 @@ def _download_page_attachments(
     page_id: str,
     slug: str,
     output_dir: str,
-    layout: str,
+    layout: Layout,
     warnings: list[str],
     file_path: str | None = None,
 ) -> dict[str, str]:
@@ -164,8 +173,6 @@ def _download_page_attachments(
     if layout == "nested" and file_path:
         # Place assets next to the markdown file (e.g. .../page-slug/assets/)
         assets_dir = os.path.join(os.path.dirname(file_path), "assets")
-    elif layout == "nested":
-        assets_dir = os.path.join(output_dir, slug, "assets")
     else:
         assets_dir = os.path.join(output_dir, "assets", slug)
 
@@ -234,27 +241,6 @@ def _build_page_tree(
     return [root_entry]
 
 
-def _build_front_matter(
-    title: str,
-    page_id: str,
-    space: str,
-    parent: str | None = None,
-    labels: list[str] | None = None,
-) -> str:
-    """Build a YAML front matter block for a pulled markdown file."""
-    data: dict[str, Any] = {
-        "title": title,
-        "page_id": page_id,
-        "space": space,
-    }
-    if parent:
-        data["parent"] = parent
-    if labels:
-        data["labels"] = labels
-    yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    return f"---\n{yaml_str}---\n\n"
-
-
 def pull_pages(
     *,
     space: str | None = None,
@@ -263,7 +249,7 @@ def pull_pages(
     output_dir: str = ".",
     recursive: bool = False,
     force: bool = False,
-    layout: str = "flat",
+    layout: Layout = "flat",
     include_attachments: bool = True,
 ) -> dict[str, Any]:
     """Pull pages from Confluence to local Markdown files.
@@ -296,23 +282,14 @@ def pull_pages(
     # Collect all pages to pull
     all_pages = _collect_tree(client, root_id, recursive)
 
-    # Compute output file paths
-    file_paths = _compute_file_paths(all_pages, output_dir, layout, root_id)
+    # Compute output file paths and lookup maps
+    file_paths, id_to_title, id_to_parent = _compute_file_paths(all_pages, output_dir, layout, root_id)
 
     # Check for conflicts
     _check_conflicts(file_paths, force)
 
-    # Build lookup maps for front matter parent resolution
-    id_to_title: dict[str, str] = {}
-    id_to_parent: dict[str, str | None] = {}
-    for entry in all_pages:
-        page = entry["page"]
-        pid = str(page["id"])
-        id_to_title[pid] = page.get("title", "")
-        id_to_parent[pid] = str(entry["parent_id"]) if entry["parent_id"] else None
-
-    # Get the root page's parent in Confluence (for front matter + manifest)
-    ancestors = client.get_page_ancestors(root_id)
+    # Get the root page's parent from already-fetched ancestors (no extra API call)
+    ancestors = root_page.get("ancestors", [])
     root_parent_title = ancestors[-1].get("title", "") if ancestors else None
 
     # Process each page
@@ -360,14 +337,14 @@ def pull_pages(
             parent_title = id_to_title.get(par_id) if par_id else None
 
         # Build and prepend front matter
-        front_matter = _build_front_matter(
+        fm = FrontMatterData(
             title=page_title,
             page_id=pid,
             space=root_space,
             parent=parent_title,
-            labels=page_labels,
+            labels=page_labels or [],
         )
-        markdown_content = front_matter + conv_result.markdown
+        markdown_content = fm.to_yaml_block() + conv_result.markdown
 
         # Write markdown file
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
@@ -384,7 +361,7 @@ def pull_pages(
 
     # Always generate manifest
     root_title = root_page.get("title", "")
-    manifest_parent = ancestors[-1].get("title", root_title) if ancestors else root_title
+    manifest_parent = root_parent_title or root_title
     pulled_labels: dict[str, list[str]] = {
         f["page_id"]: f.get("labels", []) for f in files_result
     }

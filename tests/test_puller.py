@@ -10,7 +10,8 @@ import pytest
 import yaml
 
 from confpub.errors import ERR_CONFLICT_FILE_EXISTS, ERR_VALIDATION_REQUIRED, ConfpubError
-from confpub.puller import _build_front_matter, _slugify, pull_pages
+from confpub.front_matter import FrontMatterData
+from confpub.puller import _slugify, pull_pages
 
 
 # ---------------------------------------------------------------------------
@@ -594,10 +595,10 @@ class TestManifestFlag:
 
 class TestBuildFrontMatter:
     def test_basic_fields(self):
-        fm = _build_front_matter("My Page", "123", "SD")
-        assert fm.startswith("---\n")
-        assert fm.endswith("---\n\n")
-        parsed = yaml.safe_load(fm.strip("- \n"))
+        block = FrontMatterData(title="My Page", page_id="123", space="SD").to_yaml_block()
+        assert block.startswith("---\n")
+        assert block.endswith("---\n\n")
+        parsed = yaml.safe_load(block.strip("- \n"))
         assert parsed["title"] == "My Page"
         assert parsed["page_id"] == "123"
         assert parsed["space"] == "SD"
@@ -605,14 +606,17 @@ class TestBuildFrontMatter:
         assert "labels" not in parsed
 
     def test_with_parent_and_labels(self):
-        fm = _build_front_matter("Child", "456", "SD", parent="Parent Page", labels=["a", "b"])
-        parsed = yaml.safe_load(fm.strip("- \n"))
+        block = FrontMatterData(
+            title="Child", page_id="456", space="SD",
+            parent="Parent Page", labels=["a", "b"],
+        ).to_yaml_block()
+        parsed = yaml.safe_load(block.strip("- \n"))
         assert parsed["parent"] == "Parent Page"
         assert parsed["labels"] == ["a", "b"]
 
     def test_empty_labels_omitted(self):
-        fm = _build_front_matter("Page", "1", "SD", labels=[])
-        parsed = yaml.safe_load(fm.strip("- \n"))
+        block = FrontMatterData(title="Page", page_id="1", space="SD").to_yaml_block()
+        parsed = yaml.safe_load(block.strip("- \n"))
         assert "labels" not in parsed
 
 
@@ -661,8 +665,8 @@ class TestFrontMatterInPulledFiles:
     def test_root_page_has_parent_from_ancestors(self, tmp_path):
         """Root page gets parent from Confluence ancestors."""
         page = _make_page("1", "Root")
+        page["ancestors"] = [{"title": "Space Home"}]
         client = _mock_client({"1": page})
-        client.get_page_ancestors = lambda pid: [{"title": "Space Home"}]
 
         with patch("confpub.puller.build_client", return_value=client):
             pull_pages(page_id="1", output_dir=str(tmp_path))

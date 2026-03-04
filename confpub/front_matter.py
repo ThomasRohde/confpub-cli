@@ -10,6 +10,8 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
+import yaml
+
 from confpub.converter import extract_front_matter
 from confpub.errors import ERR_VALIDATION_MARKDOWN, ConfpubError
 
@@ -23,6 +25,22 @@ class FrontMatterData:
     parent: str | None = None
     labels: list[str] = field(default_factory=list)
     page_id: str | None = None
+
+    def to_yaml_block(self) -> str:
+        """Serialize to a YAML front matter block (``--- ... ---``)."""
+        data: dict[str, Any] = {}
+        if self.title is not None:
+            data["title"] = self.title
+        if self.page_id is not None:
+            data["page_id"] = self.page_id
+        if self.space is not None:
+            data["space"] = self.space
+        if self.parent is not None:
+            data["parent"] = self.parent
+        if self.labels:
+            data["labels"] = self.labels
+        yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        return f"---\n{yaml_str}---\n\n"
 
 
 def _validate_string(raw: dict[str, Any], key: str) -> str | None:
