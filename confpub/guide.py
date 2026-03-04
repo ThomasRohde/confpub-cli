@@ -409,7 +409,7 @@ def build_guide() -> dict[str, Any]:
                 ),
                 "panels":         "::: panel Title\\ncontent\\n::: → ac:structured-macro panel",
                 "expand":         "::: expand Title\\ncontent\\n::: → ac:structured-macro expand",
-                "layouts":        ":::: layout two-equal\\n::: cell\\n...\\n::::\\n → ac:layout with ac:layout-section",
+                "layouts":        ":::: layout two-equal\\n::: cell\\n...\\n::::\\n → ac:layout with ac:layout-section. Content outside layout blocks is auto-wrapped in a single-column layout (Confluence requires all content in layout cells when layouts are used).",
                 "status":           "{status:Title|colour=Color} → ac:structured-macro status",
                 "toc":              "{toc} / {toc:maxLevel=N} → ac:structured-macro toc",
                 "anchor":           "{anchor:name} → ac:structured-macro anchor",
@@ -425,6 +425,8 @@ def build_guide() -> dict[str, Any]:
                 "All features are always-on — the parser simply ignores syntax that isn't used. "
                 "Math macros require the Confluence LaTeX Math plugin to be installed on the server. "
                 "Layouts use :::: (4 colons) for the outer layout block and ::: (3 colons) for inner cells. "
+                "When layouts are used, ALL page content must live inside layout cells — "
+                "confpub auto-wraps any content outside layout blocks in a single-column layout to satisfy this Confluence requirement. "
                 "Use {macro-name:params} for body-less Confluence macros. "
                 "Macros on their own line become block-level (no <p> wrapping)."
             ),
