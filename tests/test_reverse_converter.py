@@ -355,6 +355,50 @@ class TestLayoutReverse:
         assert "Right" in result.markdown
         assert "::::" in result.markdown
 
+    def test_layout_multiple_sections(self):
+        """Multiple ac:layout-section elements must all be converted (bug fix)."""
+        html = (
+            '<ac:layout>'
+            '<ac:layout-section ac:type="single">'
+            '<ac:layout-cell><p>Section one</p></ac:layout-cell>'
+            '</ac:layout-section>'
+            '<ac:layout-section ac:type="single">'
+            '<ac:layout-cell>'
+            '<h1>Main heading</h1>'
+            '<p>Body paragraph with <strong>bold</strong> text.</p>'
+            '<ul><li>Item A</li><li>Item B</li></ul>'
+            '</ac:layout-cell>'
+            '</ac:layout-section>'
+            '</ac:layout>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert "Section one" in result.markdown
+        assert "# Main heading" in result.markdown
+        assert "Body paragraph" in result.markdown
+        assert "**bold**" in result.markdown
+        assert "Item A" in result.markdown
+        assert "Item B" in result.markdown
+
+    def test_layout_mixed_section_types(self):
+        """Sections with different layout types preserve their types."""
+        html = (
+            '<ac:layout>'
+            '<ac:layout-section ac:type="single">'
+            '<ac:layout-cell><p>Full width</p></ac:layout-cell>'
+            '</ac:layout-section>'
+            '<ac:layout-section ac:type="two_left_sidebar">'
+            '<ac:layout-cell><p>Sidebar</p></ac:layout-cell>'
+            '<ac:layout-cell><p>Main content</p></ac:layout-cell>'
+            '</ac:layout-section>'
+            '</ac:layout>'
+        )
+        result = convert_storage_to_markdown(html)
+        assert ":::: layout single" in result.markdown
+        assert ":::: layout two-left-sidebar" in result.markdown
+        assert "Full width" in result.markdown
+        assert "Sidebar" in result.markdown
+        assert "Main content" in result.markdown
+
 
 class TestPluginRoundTrips:
     """Test round-trip conversion for new plugin features."""

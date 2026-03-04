@@ -452,14 +452,18 @@ def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
             if next_sib and next_sib.name == "ol":
                 hr.decompose()
 
-    # 5. Transform ac:layout → div[data-layout-macro]
+    # 5. Transform ac:layout → div[data-layout-macro] per section
     for layout in soup.find_all("ac:layout"):
-        layout_div = soup.new_tag("div")
-        layout_div["data-layout-macro"] = "layout"
-        section = layout.find("ac:layout-section")
-        if section:
+        sections = layout.find_all("ac:layout-section", recursive=False)
+        if not sections:
+            layout.decompose()
+            continue
+        # Build one layout div per section, then replace the ac:layout
+        section_divs = []
+        for section in sections:
+            layout_div = soup.new_tag("div")
+            layout_div["data-layout-macro"] = "layout"
             layout_type = section.get("ac:type", "single")
-            # Convert underscores back to hyphens
             layout_type = layout_type.replace("_", "-")
             layout_div["data-layout-type"] = layout_type
             for cell in section.find_all("ac:layout-cell", recursive=False):
@@ -468,7 +472,11 @@ def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
                 for child in list(cell.children):
                     cell_div.append(child.extract())
                 layout_div.append(cell_div)
-        layout.replace_with(layout_div)
+            section_divs.append(layout_div)
+        # Insert all section divs after the layout, then remove it
+        for div in reversed(section_divs):
+            layout.insert_after(div)
+        layout.decompose()
 
     # 6. Transform ac:link → a
     for link in soup.find_all("ac:link"):
