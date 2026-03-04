@@ -217,6 +217,8 @@ def command_context(command_name: str, target: dict[str, Any] | None = None) -> 
 @page_app.command("list")
 def page_list(
     space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
+    title: Optional[str] = typer.Option(None, "--title", help="Filter by title (substring match)"),
+    label: Optional[str] = typer.Option(None, "--label", help="Filter by label"),
     limit: int = typer.Option(25, "--limit", help="Maximum number of pages to return"),
     start: int = typer.Option(0, "--start", help="Starting offset for pagination"),
 ) -> None:
@@ -227,14 +229,38 @@ def page_list(
         from confpub.confluence import build_client, _slim_page
         client = build_client()
         ctx.client = client
-        page_result = client.list_pages(space, start=start, limit=limit)
-        ctx.result = {
-            "pages": [_slim_page(p, base_url=client._config.base_url.rstrip("/"), is_cloud=client._config.is_cloud) for p in page_result["pages"]],
-            "start": page_result["start"],
-            "limit": page_result["limit"],
-            "size": page_result["size"],
-            "has_more": page_result["has_more"],
-        }
+
+        if label:
+            # Use CQL search for label filtering — the list_pages API doesn't support it
+            cql = f'type = page AND space = "{space}" AND label = "{label}"'
+            if title:
+                cql += f' AND title ~ "{title}"'
+            search_result = client.search(cql, start=start, limit=limit)
+            pages = []
+            for sr in search_result.get("results", []):
+                page_id = sr.get("id")
+                if page_id:
+                    pages.append(sr)
+            ctx.result = {
+                "pages": pages,
+                "start": search_result.get("start", start),
+                "limit": search_result.get("limit", limit),
+                "size": len(pages),
+                "has_more": search_result.get("has_more", False),
+            }
+        else:
+            page_result = client.list_pages(space, start=start, limit=limit)
+            pages = [_slim_page(p, base_url=client._config.base_url.rstrip("/"), is_cloud=client._config.is_cloud) for p in page_result["pages"]]
+            if title:
+                title_lower = title.lower()
+                pages = [p for p in pages if title_lower in (p.get("title") or "").lower()]
+            ctx.result = {
+                "pages": pages,
+                "start": page_result["start"],
+                "limit": page_result["limit"],
+                "size": len(pages),
+                "has_more": page_result["has_more"],
+            }
 
 
 @page_app.command("inspect")
@@ -265,6 +291,8 @@ def page_inspect(
             ctx.result = page
         else:
             result = _slim_page(page, base_url=client._config.base_url.rstrip("/"), is_cloud=client._config.is_cloud)
+            labels = client.get_labels(str(page["id"]))
+            result["labels"] = labels
             if format == "markdown" and "body_storage" in result:
                 from confpub.reverse_converter import convert_storage_to_markdown
                 conversion = convert_storage_to_markdown(result["body_storage"])
@@ -316,6 +344,15 @@ def page_publish(
     if effective_page_id:
         target["page_id"] = effective_page_id
     with command_context("page.publish", target=target) as ctx:
+        if not source.exists():
+            from confpub.errors import ERR_IO_FILE_NOT_FOUND
+            raise ConfpubError(
+                ERR_IO_FILE_NOT_FOUND,
+                f"Source file not found: {file}",
+                details={"file": file},
+                retryable=False,
+                suggested_action="fix_input",
+            )
         space = _resolve_space(space, required=True, fm_space=fm_space)
         ctx.target["space"] = space
 
@@ -502,10 +539,21 @@ def attachment_upload(
 ) -> None:
     """Upload an attachment to a Confluence page."""
     with command_context("attachment.upload", target={"page_id": page_id, "file": file}) as ctx:
+        from pathlib import Path as _Path
+        from confpub.errors import ERR_IO_FILE_NOT_FOUND
+        source = _Path(file).resolve()
+        if not source.exists():
+            raise ConfpubError(
+                ERR_IO_FILE_NOT_FOUND,
+                f"File not found: {file}",
+                details={"file": file},
+                retryable=False,
+                suggested_action="fix_input",
+            )
         from confpub.confluence import build_client
         client = build_client()
         ctx.client = client
-        result = client.upload_attachment(page_id, file)
+        result = client.upload_attachment(page_id, str(source))
         ctx.result = result
 
 
@@ -764,9 +812,15 @@ def search(
         )
         result["cql_query"] = effective_cql
         if space and result.get("total", 0) == 0:
-            ctx.warnings.append(
-                f"No results found. Verify space '{space}' exists (use 'space list' to check)."
-            )
+            try:
+                spaces = client.list_spaces()
+                known_keys = {s["key"] for s in spaces}
+                if space not in known_keys:
+                    ctx.warnings.append(f"Space '{space}' not found. Use 'space list' to see accessible spaces.")
+                else:
+                    ctx.warnings.append(f"No results found in space '{space}'.")
+            except Exception:
+                ctx.warnings.append(f"No results found. Verify space '{space}' exists (use 'space list' to check).")
         ctx.result = result
 
 

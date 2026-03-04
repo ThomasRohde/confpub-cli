@@ -62,6 +62,14 @@ class ConfluenceClient:
     def _handle_error(self, exc: Exception, context: str = "") -> None:
         """Translate atlassian-python-api exceptions to ConfpubError."""
         msg = str(exc)
+        if isinstance(exc, (FileNotFoundError, OSError)) and not isinstance(exc, ConnectionError):
+            from confpub.errors import ERR_IO_FILE_NOT_FOUND
+            raise ConfpubError(
+                ERR_IO_FILE_NOT_FOUND,
+                f"File error ({context}): {msg}",
+                retryable=False,
+                suggested_action="fix_input",
+            ) from exc
         if "401" in msg or "Unauthorized" in msg:
             raise ConfpubError(
                 ERR_AUTH_FORBIDDEN,

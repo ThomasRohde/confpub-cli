@@ -93,7 +93,7 @@ def build_guide() -> dict[str, Any]:
                 "group": "read",
                 "mutates": False,
                 "description": "List pages in a Confluence space",
-                "flags": ["--space", "--limit", "--start"],
+                "flags": ["--space", "--title", "--label", "--limit", "--start"],
                 "result_schema": {
                     "pages": "list of slim page objects",
                     "start": "int — current offset",
@@ -104,6 +104,8 @@ def build_guide() -> dict[str, Any]:
                 "agent_hint": (
                     "Use --start and --limit for pagination: first call with --start 0 --limit 25, "
                     "then if has_more is true, call again with --start 25 --limit 25, and so on. "
+                    "Use --title for client-side substring filtering on page titles. "
+                    "Use --label to filter pages by label (uses CQL search). "
                     "For personal spaces, quote the tilde: --space '~username' "
                     "(PowerShell expands unquoted ~). Or set CONFPUB_SPACE env var."
                 ),
@@ -115,7 +117,8 @@ def build_guide() -> dict[str, Any]:
                 "flags": ["--space", "--title", "--page-id", "--format", "--raw"],
                 "agent_hint": (
                     "Use --format markdown to get the page body as Markdown instead of Confluence storage format. "
-                    "Use --raw for the full unprocessed API response (useful for debugging)."
+                    "Use --raw for the full unprocessed Confluence REST API v2 page response "
+                    "(includes extensions, metadata, restrictions, version history — useful for debugging or advanced introspection)."
                 ),
                 "result_schema": {
                     "page_id": "string",
@@ -125,6 +128,7 @@ def build_guide() -> dict[str, Any]:
                     "url": "string",
                     "body_storage": "string (when --format storage, the default)",
                     "body_markdown": "string (when --format markdown)",
+                    "labels": "list of {name, id, prefix} objects",
                 },
                 "examples": [
                     'confpub page inspect --space DEV --title "My Page"',
@@ -333,7 +337,7 @@ def build_guide() -> dict[str, Any]:
             "description": "Flags that can be placed at the top level or between group name and subcommand.",
             "flags": {
                 "--quiet": "Suppress progress output on stderr",
-                "--verbose": "Include diagnostics in result",
+                "--verbose": "Include diagnostics in result (adds metrics.diagnostics with api_call_count, python_version, confpub_version, config_source, confluence_url, is_cloud; on error includes traceback)",
                 "--compact": "Output single-line JSON (no indentation)",
                 "--version": "Show version and exit (top-level only)",
             },
