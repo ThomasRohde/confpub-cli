@@ -357,7 +357,6 @@ def page_pull(
     force: bool = typer.Option(False, "--force", help="Overwrite existing files"),
     layout: str = typer.Option("flat", "--layout", help="Output layout: flat or nested"),
     no_attachments: bool = typer.Option(False, "--no-attachments", help="Skip downloading attachments"),
-    manifest: bool = typer.Option(False, "--manifest", help="Generate confpub.yaml manifest"),
 ) -> None:
     """Pull Confluence pages to local Markdown files."""
     with command_context("page.pull", target={"space": space, "title": title, "page_id": page_id}) as ctx:
@@ -378,7 +377,6 @@ def page_pull(
             force=force,
             layout=layout,
             include_attachments=not no_attachments,
-            generate_manifest=manifest,
         )
         ctx.warnings.extend(result.pop("warnings", []))
         ctx.result = result

@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from confpub.confluence import ConfluenceClient, build_client
 from confpub.output import emit_progress
 from confpub.errors import (
@@ -147,6 +149,7 @@ def _download_page_attachments(
     output_dir: str,
     layout: str,
     warnings: list[str],
+    file_path: str | None = None,
 ) -> dict[str, str]:
     """Download attachments for a page. Returns {attachment_name: local_path}.
 
@@ -158,7 +161,10 @@ def _download_page_attachments(
     if not attachments:
         return attachment_map
 
-    if layout == "nested":
+    if layout == "nested" and file_path:
+        # Place assets next to the markdown file (e.g. .../page-slug/assets/)
+        assets_dir = os.path.join(os.path.dirname(file_path), "assets")
+    elif layout == "nested":
         assets_dir = os.path.join(output_dir, slug, "assets")
     else:
         assets_dir = os.path.join(output_dir, "assets", slug)
@@ -224,6 +230,27 @@ def _build_page_tree(
     return [root_entry]
 
 
+def _build_front_matter(
+    title: str,
+    page_id: str,
+    space: str,
+    parent: str | None = None,
+    labels: list[str] | None = None,
+) -> str:
+    """Build a YAML front matter block for a pulled markdown file."""
+    data: dict[str, Any] = {
+        "title": title,
+        "page_id": page_id,
+        "space": space,
+    }
+    if parent:
+        data["parent"] = parent
+    if labels:
+        data["labels"] = labels
+    yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return f"---\n{yaml_str}---\n\n"
+
+
 def pull_pages(
     *,
     space: str | None = None,
@@ -234,7 +261,6 @@ def pull_pages(
     force: bool = False,
     layout: str = "flat",
     include_attachments: bool = True,
-    generate_manifest: bool = False,
 ) -> dict[str, Any]:
     """Pull pages from Confluence to local Markdown files.
 
@@ -272,6 +298,19 @@ def pull_pages(
     # Check for conflicts
     _check_conflicts(file_paths, force)
 
+    # Build lookup maps for front matter parent resolution
+    id_to_title: dict[str, str] = {}
+    id_to_parent: dict[str, str | None] = {}
+    for entry in all_pages:
+        page = entry["page"]
+        pid = str(page["id"])
+        id_to_title[pid] = page.get("title", "")
+        id_to_parent[pid] = str(entry["parent_id"]) if entry["parent_id"] else None
+
+    # Get the root page's parent in Confluence (for front matter + manifest)
+    ancestors = client.get_page_ancestors(root_id)
+    root_parent_title = ancestors[-1].get("title", "") if ancestors else None
+
     # Process each page
     files_result: list[dict[str, Any]] = []
     total_attachments = 0
@@ -288,26 +327,44 @@ def pull_pages(
         # Download attachments
         attachment_map: dict[str, str] = {}
         attachments_downloaded = 0
+        out_path = file_paths[pid]
         if include_attachments:
             attachment_map = _download_page_attachments(
                 client, pid, slug, output_dir, layout, pull_warnings,
+                file_path=out_path,
             )
             attachments_downloaded = len(attachment_map)
             total_attachments += attachments_downloaded
 
         # Convert storage format to markdown
         body_storage = page.get("body", {}).get("storage", {}).get("value", "")
-        result = convert_storage_to_markdown(
+        conv_result = convert_storage_to_markdown(
             body_storage, attachment_map=attachment_map,
         )
 
-        # Write markdown file
-        out_path = file_paths[pid]
-        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-        Path(out_path).write_text(result.markdown, encoding="utf-8")
-
         # Fetch labels
         page_labels = [lbl["name"] for lbl in client.get_labels(pid)]
+
+        # Determine parent title for front matter
+        if pid == root_id:
+            parent_title = root_parent_title
+        else:
+            par_id = id_to_parent.get(pid)
+            parent_title = id_to_title.get(par_id) if par_id else None
+
+        # Build and prepend front matter
+        front_matter = _build_front_matter(
+            title=page_title,
+            page_id=pid,
+            space=root_space,
+            parent=parent_title,
+            labels=page_labels,
+        )
+        markdown_content = front_matter + conv_result.markdown
+
+        # Write markdown file
+        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+        Path(out_path).write_text(markdown_content, encoding="utf-8")
 
         files_result.append({
             "page_id": pid,
@@ -318,22 +375,17 @@ def pull_pages(
             "labels": page_labels,
         })
 
-    # Generate manifest if explicitly requested
-    manifest_file: str | None = None
-    if generate_manifest:
-        root_title = root_page.get("title", "")
-        # Determine the actual parent of the root page
-        ancestors = client.get_page_ancestors(root_id)
-        manifest_parent = ancestors[-1].get("title", root_title) if ancestors else root_title
-        # Collect labels by page ID for manifest generation
-        pulled_labels: dict[str, list[str]] = {
-            f["page_id"]: f.get("labels", []) for f in files_result
-        }
-        page_tree = _build_page_tree(all_pages, file_paths, root_id, output_dir, page_labels=pulled_labels)
-        manifest_yaml = generate_manifest_yaml(root_space, manifest_parent, page_tree)
-        manifest_path = os.path.join(output_dir, "confpub.yaml")
-        Path(manifest_path).write_text(manifest_yaml, encoding="utf-8")
-        manifest_file = manifest_path
+    # Always generate manifest
+    root_title = root_page.get("title", "")
+    manifest_parent = ancestors[-1].get("title", root_title) if ancestors else root_title
+    pulled_labels: dict[str, list[str]] = {
+        f["page_id"]: f.get("labels", []) for f in files_result
+    }
+    page_tree = _build_page_tree(all_pages, file_paths, root_id, output_dir, page_labels=pulled_labels)
+    manifest_yaml = generate_manifest_yaml(root_space, manifest_parent, page_tree)
+    manifest_path = os.path.join(output_dir, "confpub.yaml")
+    Path(manifest_path).write_text(manifest_yaml, encoding="utf-8")
+    manifest_file: str = manifest_path
 
     # Update lockfile
     lockfile_path = os.path.join(output_dir, "confpub.lock")
@@ -356,6 +408,6 @@ def pull_pages(
         "summary": {
             "pages_pulled": len(files_result),
             "attachments_downloaded": total_attachments,
-            "manifest_generated": manifest_file is not None,
+            "manifest_generated": True,
         },
     }

@@ -7,8 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import yaml
+
 from confpub.errors import ERR_CONFLICT_FILE_EXISTS, ERR_VALIDATION_REQUIRED, ConfpubError
-from confpub.puller import _slugify, pull_pages
+from confpub.puller import _build_front_matter, _slugify, pull_pages
 
 
 # ---------------------------------------------------------------------------
@@ -61,12 +63,16 @@ def _mock_client(pages: dict[str, dict], children: dict[str, list] | None = None
     def get_page_ancestors(pid):
         return []
 
+    def get_labels(pid):
+        return []
+
     client.get_page_by_id = get_page_by_id
     client.get_page = get_page
     client.get_page_children_deep = get_page_children_deep
     client.get_attachments = get_attachments
     client.download_attachment = download_attachment
     client.get_page_ancestors = get_page_ancestors
+    client.get_labels = get_labels
     return client
 
 
@@ -113,11 +119,14 @@ class TestSinglePagePull:
         assert result["files"][0]["page_id"] == "123"
         assert result["files"][0]["title"] == "Overview"
 
-        # File should exist
+        # File should exist with front matter
         md_file = tmp_path / "overview.md"
         assert md_file.exists()
         content = md_file.read_text()
+        assert content.startswith("---\n")
         assert "Hello world" in content
+        assert "page_id: '123'" in content
+        assert "title: Overview" in content
 
     def test_pull_single_page_by_space_title(self, tmp_path):
         page = _make_page("456", "Getting Started", "<h1>Welcome</h1>")
@@ -180,7 +189,6 @@ class TestRecursivePull:
                 page_id="1",
                 output_dir=str(tmp_path),
                 recursive=True,
-                generate_manifest=True,
             )
 
         assert result["summary"]["manifest_generated"] is True
@@ -410,7 +418,6 @@ class TestDataCenterCompat:
             result = pull_pages(
                 space="PROJ", title="Root",
                 output_dir=str(tmp_path), recursive=True,
-                generate_manifest=True,
             )
 
         assert result["summary"]["pages_pulled"] == 2
@@ -482,6 +489,7 @@ class TestMultiLevelRecursivePull:
         assert (tmp_path / "child.md").exists()
         assert (tmp_path / "grandchild.md").exists()
         gc_content = (tmp_path / "grandchild.md").read_text()
+        assert gc_content.startswith("---\n")
         assert "Deep content" in gc_content
 
     def test_page_id_recursive_combination(self, tmp_path):
@@ -527,7 +535,6 @@ class TestManifestPathSeparators:
                 output_dir=str(tmp_path),
                 recursive=True,
                 layout="nested",
-                generate_manifest=True,
             )
 
         manifest_content = Path(result["manifest_file"]).read_text()
@@ -537,10 +544,10 @@ class TestManifestPathSeparators:
                 assert "\\" not in line, f"Backslash found in manifest path: {line}"
 
 
-class TestNestedLayoutNoAutoManifest:
-    """Bug 4: --layout nested without --manifest should NOT create confpub.yaml."""
+class TestManifestAlwaysGenerated:
+    """Manifest is always generated regardless of layout."""
 
-    def test_nested_without_manifest_flag(self, tmp_path):
+    def test_nested_always_generates_manifest(self, tmp_path):
         root = _make_page("1", "Root")
         child = _make_page("2", "Child")
         pages = {"1": root, "2": child}
@@ -553,17 +560,16 @@ class TestNestedLayoutNoAutoManifest:
                 output_dir=str(tmp_path),
                 recursive=True,
                 layout="nested",
-                generate_manifest=False,
             )
 
-        assert result["summary"]["manifest_generated"] is False
-        assert result["manifest_file"] is None
-        assert not (tmp_path / "confpub.yaml").exists()
+        assert result["summary"]["manifest_generated"] is True
+        assert result["manifest_file"] is not None
+        assert (tmp_path / "confpub.yaml").exists()
 
 
 class TestManifestFlag:
-    def test_single_page_with_manifest_flag(self, tmp_path):
-        """--manifest generates confpub.yaml even for a single page."""
+    def test_single_page_generates_manifest(self, tmp_path):
+        """Manifest is always generated, even for a single page."""
         page = _make_page("1", "Solo Page")
         client = _mock_client({"1": page})
 
@@ -571,7 +577,6 @@ class TestManifestFlag:
             result = pull_pages(
                 page_id="1",
                 output_dir=str(tmp_path),
-                generate_manifest=True,
             )
 
         assert result["summary"]["manifest_generated"] is True
@@ -580,3 +585,89 @@ class TestManifestFlag:
         assert manifest.exists()
         content = manifest.read_text()
         assert "Solo Page" in content
+
+
+# ---------------------------------------------------------------------------
+# Front matter tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildFrontMatter:
+    def test_basic_fields(self):
+        fm = _build_front_matter("My Page", "123", "SD")
+        assert fm.startswith("---\n")
+        assert fm.endswith("---\n\n")
+        parsed = yaml.safe_load(fm.strip("- \n"))
+        assert parsed["title"] == "My Page"
+        assert parsed["page_id"] == "123"
+        assert parsed["space"] == "SD"
+        assert "parent" not in parsed
+        assert "labels" not in parsed
+
+    def test_with_parent_and_labels(self):
+        fm = _build_front_matter("Child", "456", "SD", parent="Parent Page", labels=["a", "b"])
+        parsed = yaml.safe_load(fm.strip("- \n"))
+        assert parsed["parent"] == "Parent Page"
+        assert parsed["labels"] == ["a", "b"]
+
+    def test_empty_labels_omitted(self):
+        fm = _build_front_matter("Page", "1", "SD", labels=[])
+        parsed = yaml.safe_load(fm.strip("- \n"))
+        assert "labels" not in parsed
+
+
+class TestFrontMatterInPulledFiles:
+    def test_front_matter_fields_correct(self, tmp_path):
+        """Pulled files contain correct front matter metadata."""
+        root = _make_page("1", "Root", space_key="SD")
+        child = _make_page("2", "Child Page", "<p>Body</p>", space_key="SD")
+        pages = {"1": root, "2": child}
+        children = {"1": [child]}
+        client = _mock_client(pages, children)
+        client.get_labels = lambda pid: [{"name": "my-label"}] if pid == "2" else []
+
+        with patch("confpub.puller.build_client", return_value=client):
+            pull_pages(
+                page_id="1",
+                output_dir=str(tmp_path),
+                recursive=True,
+            )
+
+        # Check child file front matter
+        child_content = (tmp_path / "child-page.md").read_text()
+        assert child_content.startswith("---\n")
+        # Extract YAML block
+        parts = child_content.split("---\n", 2)
+        fm = yaml.safe_load(parts[1])
+        assert fm["title"] == "Child Page"
+        assert fm["page_id"] == "2"
+        assert fm["space"] == "SD"
+        assert fm["parent"] == "Root"
+        assert fm["labels"] == ["my-label"]
+
+    def test_root_page_has_no_parent_when_no_ancestors(self, tmp_path):
+        """Root page omits parent when Confluence has no ancestors."""
+        page = _make_page("1", "Root")
+        client = _mock_client({"1": page})
+
+        with patch("confpub.puller.build_client", return_value=client):
+            pull_pages(page_id="1", output_dir=str(tmp_path))
+
+        content = (tmp_path / "root.md").read_text()
+        parts = content.split("---\n", 2)
+        fm = yaml.safe_load(parts[1])
+        assert "parent" not in fm
+
+    def test_root_page_has_parent_from_ancestors(self, tmp_path):
+        """Root page gets parent from Confluence ancestors."""
+        page = _make_page("1", "Root")
+        client = _mock_client({"1": page})
+        client.get_page_ancestors = lambda pid: [{"title": "Space Home"}]
+
+        with patch("confpub.puller.build_client", return_value=client):
+            pull_pages(page_id="1", output_dir=str(tmp_path))
+
+        content = (tmp_path / "root.md").read_text()
+        parts = content.split("---\n", 2)
+        fm = yaml.safe_load(parts[1])
+        assert fm["parent"] == "Space Home"
