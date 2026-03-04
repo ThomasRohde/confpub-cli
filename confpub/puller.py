@@ -194,11 +194,13 @@ def _build_page_tree(
     root_page_id: str,
     output_dir: str = ".",
     page_labels: dict[str, list[str]] | None = None,
+    page_assets: dict[str, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build a hierarchical page tree for manifest generation."""
     id_to_entry: dict[str, dict[str, Any]] = {}
     children_map: dict[str | None, list[str]] = {}
     labels_map = page_labels or {}
+    assets_map = page_assets or {}
 
     for entry in pages:
         page = entry["page"]
@@ -214,6 +216,8 @@ def _build_page_tree(
         }
         if labels_map.get(pid):
             node["labels"] = labels_map[pid]
+        if assets_map.get(pid):
+            node["assets"] = assets_map[pid]
         id_to_entry[pid] = node
         children_map.setdefault(parent_id, []).append(pid)
 
@@ -315,6 +319,7 @@ def pull_pages(
     files_result: list[dict[str, Any]] = []
     total_attachments = 0
     pull_warnings: list[str] = []
+    pulled_assets: dict[str, list[str]] = {}  # page_id -> list of relative asset paths
 
     for entry in all_pages:
         page = entry["page"]
@@ -335,6 +340,8 @@ def pull_pages(
             )
             attachments_downloaded = len(attachment_map)
             total_attachments += attachments_downloaded
+            if attachment_map:
+                pulled_assets[pid] = list(attachment_map.values())
 
         # Convert storage format to markdown
         body_storage = page.get("body", {}).get("storage", {}).get("value", "")
@@ -381,7 +388,7 @@ def pull_pages(
     pulled_labels: dict[str, list[str]] = {
         f["page_id"]: f.get("labels", []) for f in files_result
     }
-    page_tree = _build_page_tree(all_pages, file_paths, root_id, output_dir, page_labels=pulled_labels)
+    page_tree = _build_page_tree(all_pages, file_paths, root_id, output_dir, page_labels=pulled_labels, page_assets=pulled_assets)
     manifest_yaml = generate_manifest_yaml(root_space, manifest_parent, page_tree)
     manifest_path = os.path.join(output_dir, "confpub.yaml")
     Path(manifest_path).write_text(manifest_yaml, encoding="utf-8")

@@ -191,6 +191,9 @@ def generate_manifest_yaml(
         result = []
         for p in pages:
             entry: dict[str, Any] = {"title": p["title"], "file": p["file"]}
+            assets = p.get("assets", [])
+            if assets:
+                entry["assets"] = assets
             labels = p.get("labels", [])
             if labels:
                 entry["labels"] = labels
