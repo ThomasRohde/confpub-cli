@@ -713,6 +713,43 @@ def _create_parser() -> MarkdownIt:
     return md
 
 
+_LAYOUT_BLOCK_RE = re.compile(r"<ac:layout>.*?</ac:layout>", re.DOTALL)
+
+_LAYOUT_WRAP_PREFIX = (
+    '<ac:layout><ac:layout-section ac:type="single"><ac:layout-cell>'
+)
+_LAYOUT_WRAP_SUFFIX = "</ac:layout-cell></ac:layout-section></ac:layout>"
+
+
+def _wrap_non_layout_content(html: str) -> str:
+    """Wrap content outside ``<ac:layout>`` blocks in single-column layouts.
+
+    Confluence Server's editor cannot handle a mix of layout blocks and
+    top-level content on the same page — it enters "layout mode" and makes
+    everything outside cells read-only.  This function detects when layout
+    blocks are present and wraps any surrounding content in its own
+    single-column layout so the entire page is in layout mode.
+    """
+    if "<ac:layout>" not in html:
+        return html
+
+    parts: list[str] = []
+    last_end = 0
+
+    for match in _LAYOUT_BLOCK_RE.finditer(html):
+        before = html[last_end:match.start()]
+        if before.strip():
+            parts.append(_LAYOUT_WRAP_PREFIX + before + _LAYOUT_WRAP_SUFFIX)
+        parts.append(match.group(0))
+        last_end = match.end()
+
+    after = html[last_end:]
+    if after.strip():
+        parts.append(_LAYOUT_WRAP_PREFIX + after + _LAYOUT_WRAP_SUFFIX)
+
+    return "".join(parts)
+
+
 def convert_markdown(md_text: str) -> str:
     """Convert Markdown text to Confluence Storage Format.
 
@@ -725,7 +762,8 @@ def convert_markdown(md_text: str) -> str:
     parser = _create_parser()
     tokens = parser.parse(md_text)
     renderer = ConfluenceRenderer()
-    return renderer.render(tokens, {}, {})
+    html = renderer.render(tokens, {}, {})
+    return _wrap_non_layout_content(html)
 
 
 def extract_h1_title(md_text: str) -> str | None:

@@ -421,6 +421,80 @@ class TestContainerLayout:
         assert result.count("<ac:layout-cell>") == 3
 
 
+class TestLayoutWrapping:
+    """Confluence Server cannot handle content outside <ac:layout> blocks.
+
+    When layout blocks are present, all surrounding content must be wrapped
+    in single-column layout blocks so the editor stays in layout mode.
+    """
+
+    def test_content_before_layout_is_wrapped(self):
+        md = "## Heading\n\nParagraph.\n\n:::: layout two-equal\n::: cell\nLeft\n:::\n::: cell\nRight\n:::\n::::"
+        result = convert_markdown(md)
+        # The heading and paragraph should be inside a single-column layout
+        assert result.startswith('<ac:layout><ac:layout-section ac:type="single"><ac:layout-cell>')
+        # The original layout block should still be present
+        assert '<ac:layout><ac:layout-section ac:type="two_equal">' in result
+
+    def test_content_after_layout_is_wrapped(self):
+        md = ":::: layout two-equal\n::: cell\nLeft\n:::\n::: cell\nRight\n:::\n::::\n\n## After\n\nMore text."
+        result = convert_markdown(md)
+        # Should end with a wrapped single-column block
+        assert result.endswith("</ac:layout-cell></ac:layout-section></ac:layout>")
+        # Count: one two_equal layout + one single wrapper
+        assert result.count("<ac:layout>") == 2
+
+    def test_content_before_and_after_layout_wrapped(self):
+        md = (
+            "## Before\n\n"
+            ":::: layout two-equal\n::: cell\nL\n:::\n::: cell\nR\n:::\n::::\n\n"
+            "## After\n"
+        )
+        result = convert_markdown(md)
+        # Two wrappers (before + after) plus the real layout = 3 layout blocks
+        assert result.count("<ac:layout>") == 3
+        assert result.count("</ac:layout>") == 3
+
+    def test_no_layout_blocks_unchanged(self):
+        md = "## Heading\n\nParagraph."
+        result = convert_markdown(md)
+        # No layout blocks should be introduced
+        assert "<ac:layout>" not in result
+
+    def test_only_layout_no_extra_wrapping(self):
+        md = ":::: layout two-equal\n::: cell\nLeft\n:::\n::: cell\nRight\n:::\n::::"
+        result = convert_markdown(md)
+        # Only one layout block — no extra wrappers
+        assert result.count("<ac:layout>") == 1
+
+    def test_mixed_content_with_table_and_macros(self):
+        """Reproduce the exact scenario from the bug report."""
+        md = (
+            "## Some heading\n\n"
+            "Regular paragraph text.\n\n"
+            ":::: layout two-equal\n"
+            "::: cell\nLeft column content.\n:::\n"
+            "::: cell\nRight column content.\n:::\n"
+            "::::\n\n"
+            "## Another heading\n\n"
+            "| Col A | Col B |\n"
+            "|-------|-------|\n"
+            "| 1     | 2     |\n"
+        )
+        result = convert_markdown(md)
+        # All content should be inside layout blocks
+        assert result.count("<ac:layout>") == 3
+        # The heading before should be wrapped
+        assert "Some heading" in result
+        # The table after should be wrapped
+        assert "Col A" in result
+        # No top-level content outside layout blocks
+        # Split by </ac:layout> and check there's nothing outside
+        import re
+        outside = re.sub(r"<ac:layout>.*?</ac:layout>", "", result, flags=re.DOTALL)
+        assert outside.strip() == ""
+
+
 class TestExtractFrontMatter:
     def test_basic_extraction(self):
         md = "---\ntitle: Hello\nspace: DEV\n---\n\n# Content"
