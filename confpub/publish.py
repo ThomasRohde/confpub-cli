@@ -57,6 +57,7 @@ def publish_page(
     backup: bool = False,
     progress_callback: Any = None,
     labels: list[str] | None = None,
+    html_macro_name: str | None = None,
 ) -> dict[str, Any]:
     """Publish a single Markdown file to Confluence.
 
@@ -77,11 +78,14 @@ def publish_page(
 
     # Read and convert
     md_text = source_path.read_text(encoding="utf-8")
-    storage = convert_markdown(md_text)
-    local_fingerprint = fingerprint_content(storage)
 
-    # Build client
+    # Build client (needed for is_cloud detection)
     config = load_config()
+
+    # Resolve html_macro_name: explicit > ("html-macro" if cloud else "html")
+    effective_html_macro = html_macro_name or ("html-macro" if config.is_cloud else "html")
+    storage = convert_markdown(md_text, html_macro_name=effective_html_macro)
+    local_fingerprint = fingerprint_content(storage)
     client = ConfluenceClient(config)
 
     # Load lockfile (from file's directory)

@@ -110,6 +110,8 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
             return self._convert_page_ref_macro(el, macro_name)
         if macro_name == "excerpt":
             return self._convert_excerpt_macro(el)
+        if macro_name in ("html", "html-macro"):
+            return self._convert_html_macro(el)
         # Unknown macro
         self._unknown_macros.append(macro_name)
         self._warnings.append(f"Unknown macro '{macro_name}' converted to HTML comment")
@@ -270,6 +272,11 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
             body_text = el.get_text().strip()
         header = "excerpt hidden" if hidden else "excerpt"
         return f"\n\n::: {header}\n{body_text}\n:::\n\n"
+
+    def _convert_html_macro(self, el: Tag) -> str:
+        code_el = el.find("pre", class_="confluence-code-body")
+        content = code_el.get_text() if code_el else ""
+        return f"\n\n::: html\n{content}\n:::\n\n"
 
     # ------------------------------------------------------------------
     # Image handling (pre-processed from ac:image)

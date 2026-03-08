@@ -25,6 +25,7 @@ class FrontMatterData:
     parent: str | None = None
     labels: list[str] = field(default_factory=list)
     page_id: str | None = None
+    html_macro_name: str | None = None
 
     def to_yaml_block(self) -> str:
         """Serialize to a YAML front matter block (``--- ... ---``)."""
@@ -39,6 +40,8 @@ class FrontMatterData:
             data["parent"] = self.parent
         if self.labels:
             data["labels"] = self.labels
+        if self.html_macro_name is not None:
+            data["html_macro_name"] = self.html_macro_name
         yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
         return f"---\n{yaml_str}---\n\n"
 
@@ -108,10 +111,13 @@ def parse_front_matter(md_text: str) -> FrontMatterData | None:
                 details={"field": "page_id", "value_type": type(page_id_raw).__name__},
             )
 
+    html_macro_name = _validate_string(raw, "html_macro_name")
+
     return FrontMatterData(
         title=title,
         space=space,
         parent=parent,
         labels=labels,
         page_id=page_id,
+        html_macro_name=html_macro_name,
     )

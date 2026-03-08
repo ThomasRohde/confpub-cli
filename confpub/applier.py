@@ -27,6 +27,7 @@ def apply_plan(
     backup: bool = False,
     skip_fingerprint_check: bool = False,
     cascade: bool = False,
+    html_macro_name: str | None = None,
 ) -> dict[str, Any]:
     """Apply a plan to Confluence.
 
@@ -37,6 +38,9 @@ def apply_plan(
 
     config = load_config()
     client = ConfluenceClient(config)
+
+    # Resolve html_macro_name: explicit > auto-detect from config
+    effective_html_macro = html_macro_name or ("html-macro" if config.is_cloud else "html")
 
     # Load or create lockfile
     lockfile_path = plan_dir / "confpub.lock"
@@ -86,7 +90,7 @@ def apply_plan(
 
         # Read and convert
         md_text = source_path.read_text(encoding="utf-8")
-        storage = convert_markdown(md_text)
+        storage = convert_markdown(md_text, html_macro_name=effective_html_macro)
 
         # Discover and process assets
         assets = discover_assets(md_text, source_path.parent, None)

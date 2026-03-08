@@ -24,6 +24,7 @@ from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.front_matter import front_matter_plugin
 from mdit_py_plugins.container import container_plugin
 
+from confpub.html_macro_plugin import html_macro_plugin
 from confpub.macro_plugin import confluence_macro_plugin
 
 # Admonition types mapping: GitHub [!TYPE] → Confluence macro name
@@ -42,11 +43,12 @@ _ADMONITION_RE = re.compile(r"^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$", r
 class ConfluenceRenderer:
     """Renders markdown-it-py tokens into Confluence Storage Format XHTML."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, html_macro_name: str = "html") -> None:
         self._output: list[str] = []
         self._list_stack: list[str] = []  # track nested ol/ul ("ol", "ul", "task-list")
         self._task_id: int = 0  # incrementing counter for Confluence task IDs
         self._footnote_refs: dict[int, int] = {}  # meta.id → display number
+        self._html_macro_name = html_macro_name
 
     def render(self, tokens: list[Token], options: dict[str, Any], env: dict[str, Any]) -> str:
         """Render a list of tokens to Confluence Storage Format."""
@@ -397,6 +399,16 @@ class ConfluenceRenderer:
         self._output.append(tokens[idx].content)
         return idx + 1
 
+    def _render_html_macro(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
+        content = tokens[idx].content
+        macro_name = self._html_macro_name
+        self._output.append(
+            f'<ac:structured-macro ac:name="{macro_name}">'
+            f"<ac:plain-text-body><![CDATA[{content}]]></ac:plain-text-body>"
+            "</ac:structured-macro>"
+        )
+        return idx + 1
+
     def _inline_html_inline(self, token: Token) -> None:
         # Suppress task-list checkboxes (already handled by _render_list_item_open)
         if "task-list-item-checkbox" in (token.content or ""):
@@ -704,6 +716,7 @@ def _create_parser() -> MarkdownIt:
     deflist_plugin(md)
     footnote_plugin(md)
     front_matter_plugin(md)
+    html_macro_plugin(md)
     container_plugin(md, name="panel")
     container_plugin(md, name="expand")
     container_plugin(md, name="layout")
@@ -750,18 +763,20 @@ def _wrap_non_layout_content(html: str) -> str:
     return "".join(parts)
 
 
-def convert_markdown(md_text: str) -> str:
+def convert_markdown(md_text: str, *, html_macro_name: str = "html") -> str:
     """Convert Markdown text to Confluence Storage Format.
 
     Args:
         md_text: Markdown source text.
+        html_macro_name: Name for the HTML macro (``"html"`` for DC,
+            ``"html-macro"`` for Cloud).
 
     Returns:
         Confluence Storage Format XHTML string.
     """
     parser = _create_parser()
     tokens = parser.parse(md_text)
-    renderer = ConfluenceRenderer()
+    renderer = ConfluenceRenderer(html_macro_name=html_macro_name)
     html = renderer.render(tokens, {}, {})
     return _wrap_non_layout_content(html)
 

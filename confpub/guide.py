@@ -140,7 +140,7 @@ def build_guide() -> dict[str, Any]:
                 "group": "write",
                 "mutates": True,
                 "description": "Publish a single Markdown file to Confluence",
-                "flags": ["--space", "--parent", "--title", "--title-from-h1", "--page-id", "--dry-run", "--backup", "--label"],
+                "flags": ["--space", "--parent", "--title", "--title-from-h1", "--page-id", "--dry-run", "--backup", "--label", "--html-macro-name"],
                 "agent_hint": (
                     "Title precedence: explicit --title > --title-from-h1 > front-matter title > filename inference. "
                     "Space precedence: --space > front-matter space > CONFPUB_SPACE env var. "
@@ -242,7 +242,7 @@ def build_guide() -> dict[str, Any]:
                 "group": "transactional",
                 "mutates": False,
                 "description": "Generate a plan artifact from a manifest or file",
-                "flags": ["--manifest", "--output", "--space", "--parent"],
+                "flags": ["--manifest", "--output", "--space", "--parent", "--html-macro-name"],
             },
             "plan.validate": {
                 "group": "transactional",
@@ -256,7 +256,7 @@ def build_guide() -> dict[str, Any]:
                 "description": "Apply a plan to Confluence",
                 "flags": [
                     "--plan", "--dry-run", "--backup",
-                    "--skip-fingerprint-check", "--cascade",
+                    "--skip-fingerprint-check", "--cascade", "--html-macro-name",
                 ],
                 "safety_flags": {
                     "--skip-fingerprint-check": (
@@ -422,6 +422,7 @@ def build_guide() -> dict[str, Any]:
                 "recently_updated": "{recently-updated} → ac:structured-macro recently-updated",
                 "excerpt_include":  "{excerpt-include:Page Title} → ac:structured-macro excerpt-include",
                 "include_page":     "{include:Page Title} → ac:structured-macro include",
+                "html_macro":       "::: html\\n<raw HTML>\\n::: → ac:structured-macro html (DC) or html-macro (Cloud)",
                 "excerpt":          "::: excerpt hidden\\ncontent\\n::: → ac:structured-macro excerpt",
             },
             "layout_types": ["single", "two-equal", "two-left-sidebar", "two-right-sidebar", "three-equal", "three-with-sidebars"],
@@ -446,6 +447,7 @@ def build_guide() -> dict[str, Any]:
                 "parent": "Parent page title (string)",
                 "labels": "Labels to apply (list of strings, or single string)",
                 "page_id": "Confluence page ID for direct update (string or integer)",
+                "html_macro_name": "HTML macro name override (string; 'html' for DC, 'html-macro' for Cloud; auto-detected by default)",
             },
             "precedence": {
                 "title": "--title > --title-from-h1 > front-matter > filename",

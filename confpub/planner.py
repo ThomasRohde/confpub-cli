@@ -35,6 +35,7 @@ def create_plan(
     output_path: str | None = None,
     space_override: str | None = None,
     parent_override: str | None = None,
+    html_macro_name: str | None = None,
 ) -> dict[str, Any]:
     """Create a plan artifact from a manifest.
 
@@ -52,6 +53,9 @@ def create_plan(
     # Build Confluence client
     config = load_config()
     client = ConfluenceClient(config)
+
+    # Resolve html_macro_name: explicit > auto-detect from config
+    effective_html_macro = html_macro_name or ("html-macro" if config.is_cloud else "html")
 
     # Resolve page tree
     flat_pages = resolve_page_tree(manifest)
@@ -76,7 +80,7 @@ def create_plan(
 
         # Read and convert markdown
         md_text = source_path.read_text(encoding="utf-8")
-        storage = convert_markdown(md_text)
+        storage = convert_markdown(md_text, html_macro_name=effective_html_macro)
         local_fingerprint = fingerprint_content(storage)
 
         # Look up existing page
