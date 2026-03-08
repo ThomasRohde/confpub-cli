@@ -149,7 +149,9 @@ def build_guide() -> dict[str, Any]:
                     "When writing Markdown files for publication, include YAML front-matter to embed metadata: "
                     "---\\ntitle: Page Title\\nspace: SPACEKEY\\nparent: Parent Title\\nlabels:\\n  - tag1\\n---\\n "
                     "For personal spaces, quote the tilde: --space '~username' "
-                    "(PowerShell expands unquoted ~). Or set CONFPUB_SPACE env var."
+                    "(PowerShell expands unquoted ~). Or set CONFPUB_SPACE env var. "
+                    "HTML macro name: auto-detected from Confluence type (Cloud=html-macro, DC=html). "
+                    "Override with --html-macro-name or html_macro_name in front-matter."
                 ),
             },
             "page.move": {
@@ -422,7 +424,15 @@ def build_guide() -> dict[str, Any]:
                 "recently_updated": "{recently-updated} → ac:structured-macro recently-updated",
                 "excerpt_include":  "{excerpt-include:Page Title} → ac:structured-macro excerpt-include",
                 "include_page":     "{include:Page Title} → ac:structured-macro include",
-                "html_macro":       "::: html\\n<raw HTML>\\n::: → ac:structured-macro html (DC) or html-macro (Cloud)",
+                "html_macro": (
+                    "::: html\\n<raw HTML>\\n::: → ac:structured-macro html (DC) or html-macro (Cloud). "
+                    "Content is wrapped in CDATA and passed verbatim — Confluence does NOT strip "
+                    "<style>, <script>, <iframe>, or any other tags inside the HTML macro. "
+                    "Use this for custom CSS styling, dashboards, diagrams, embedded widgets, "
+                    "or any HTML that Confluence would otherwise sanitize. "
+                    "The macro name is auto-detected (Cloud=html-macro, DC=html) but can be "
+                    "overridden via --html-macro-name flag or html_macro_name front-matter field."
+                ),
                 "excerpt":          "::: excerpt hidden\\ncontent\\n::: → ac:structured-macro excerpt",
             },
             "layout_types": ["single", "two-equal", "two-left-sidebar", "two-right-sidebar", "three-equal", "three-with-sidebars"],
@@ -433,8 +443,69 @@ def build_guide() -> dict[str, Any]:
                 "When layouts are used, ALL page content must live inside layout cells — "
                 "confpub auto-wraps any content outside layout blocks in a single-column layout to satisfy this Confluence requirement. "
                 "Use {macro-name:params} for body-less Confluence macros. "
-                "Macros on their own line become block-level (no <p> wrapping)."
+                "Macros on their own line become block-level (no <p> wrapping). "
+                "IMPORTANT: When the user needs custom styling, CSS, embedded widgets, iframes, "
+                "or any HTML that Confluence normally strips, use ::: html blocks. "
+                "Confluence strips <style>, <script>, <iframe> etc. from normal content, "
+                "but the HTML macro preserves them. This is the ONLY way to embed arbitrary HTML. "
+                "Example: ::: html\\n<style>.box { border: 1px solid blue; }</style>\\n"
+                "<div class=\"box\">Styled content</div>\\n::: "
+                "Multiple ::: html blocks can appear on the same page. "
+                "The macro name auto-detects Cloud vs DC — no configuration needed."
             ),
+            "html_macro_examples": [
+                {
+                    "description": "Custom styled card with CSS",
+                    "markdown": (
+                        "::: html\n"
+                        "<style>\n"
+                        "  .info-card { border: 2px solid #0052CC; border-radius: 8px; padding: 16px; }\n"
+                        "  .info-card h3 { color: #0052CC; margin-top: 0; }\n"
+                        "</style>\n"
+                        "<div class=\"info-card\">\n"
+                        "  <h3>Key Metric</h3>\n"
+                        "  <p>Value: <strong>99.9%</strong></p>\n"
+                        "</div>\n"
+                        ":::"
+                    ),
+                },
+                {
+                    "description": "Flexbox dashboard layout",
+                    "markdown": (
+                        "::: html\n"
+                        "<style>\n"
+                        "  .dash { display: flex; gap: 16px; }\n"
+                        "  .dash-card { flex: 1; padding: 16px; border-radius: 8px; color: #fff; }\n"
+                        "</style>\n"
+                        "<div class=\"dash\">\n"
+                        "  <div class=\"dash-card\" style=\"background:#0052CC\">Users: 1,234</div>\n"
+                        "  <div class=\"dash-card\" style=\"background:#36B37E\">Revenue: $56K</div>\n"
+                        "</div>\n"
+                        ":::"
+                    ),
+                },
+                {
+                    "description": "Embedded iframe (e.g. external dashboard)",
+                    "markdown": (
+                        "::: html\n"
+                        "<iframe src=\"https://example.com/dashboard\" "
+                        "width=\"100%\" height=\"400\" frameborder=\"0\"></iframe>\n"
+                        ":::"
+                    ),
+                },
+                {
+                    "description": "Progress bar with CSS gradients",
+                    "markdown": (
+                        "::: html\n"
+                        "<div style=\"background:#DFE1E6; border-radius:12px; overflow:hidden; height:24px;\">\n"
+                        "  <div style=\"width:75%; height:100%; background:linear-gradient(90deg,#0052CC,#4C9AFF); "
+                        "border-radius:12px; color:#fff; font-size:12px; display:flex; align-items:center; "
+                        "justify-content:flex-end; padding-right:8px; font-weight:600;\">75%</div>\n"
+                        "</div>\n"
+                        ":::"
+                    ),
+                },
+            ],
         },
         "front_matter": {
             "description": (
@@ -455,6 +526,7 @@ def build_guide() -> dict[str, Any]:
                 "parent": "--parent > front-matter",
                 "page_id": "--page-id > front-matter",
                 "labels": "CLI --label + front-matter labels merged (deduplicated)",
+                "html_macro_name": "--html-macro-name > front-matter > auto-detect (Cloud=html-macro, DC=html)",
             },
             "example": (
                 "---\n"
