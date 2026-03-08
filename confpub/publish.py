@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from confpub.assets import discover_assets, rewrite_image_urls, upload_assets
+from confpub.assets import discover_assets, discover_html_macro_warnings, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
 from confpub.config import load_config
 from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, fingerprint_content
@@ -123,8 +123,9 @@ def publish_page(
             version = existing.get("version", {})
             current_version = version.get("number") if isinstance(version, dict) else version
 
-    # Discover assets
+    # Discover assets (including script/link refs in ::: html blocks)
     assets = discover_assets(md_text, source_path.parent)
+    html_macro_warnings = discover_html_macro_warnings(md_text, source_path.parent)
 
     # Determine operation
     operation = "update" if existing_page_id else "create"
@@ -154,7 +155,7 @@ def publish_page(
         if labels:
             change["labels_to_apply"] = labels
 
-        warnings: list[str] = []
+        warnings: list[str] = list(html_macro_warnings)
         parent_page = client.get_page(space, parent)
         if not parent_page:
             warnings.append(f"Parent page '{parent}' not found in space '{space}' — publish will fail")
@@ -212,11 +213,17 @@ def publish_page(
         if isinstance(new_version, dict):
             new_version = new_version.get("number", (current_version or 0) + 1)
 
-    # Upload assets
+    # Upload assets and rewrite URLs
     uploaded_attachments = []
     if assets:
         uploaded = upload_assets(client, page_id, assets)
         storage = rewrite_image_urls(storage, uploaded)
+        storage = rewrite_html_macro_urls(
+            storage, uploaded,
+            base_url=config.base_url or "",
+            is_cloud=config.is_cloud,
+            page_id=page_id,
+        )
         # Re-update with rewritten URLs
         client.update_page(page_id, page_title, storage)
         uploaded_attachments = [a.source_path for a in assets]
@@ -251,8 +258,11 @@ def publish_page(
     if labels:
         change["labels_added"] = labels
 
-    return {
+    result_out: dict[str, Any] = {
         "dry_run": False,
         "changes": [change],
         "summary": {operation: 1, "attachments_upload": len(uploaded_attachments)},
     }
+    if html_macro_warnings:
+        result_out["warnings"] = html_macro_warnings
+    return result_out

@@ -321,6 +321,47 @@ confpub converts Markdown to Confluence Storage Format (and back via `page pull`
 | `{excerpt-include:Page}` | Excerpt Include macro |
 | `{include:Page}` | Include Page macro |
 | `::: excerpt` | Excerpt macro (body) |
+| `::: html` | HTML macro (preserves `<style>`, `<script>`, `<iframe>`) |
+
+---
+
+## HTML Macro
+
+Confluence strips `<style>`, `<script>`, `<iframe>`, and other tags from normal page content. The **HTML macro** is the only way to embed arbitrary HTML. confpub supports it via `::: html` fenced blocks:
+
+```markdown
+::: html
+<style>
+  .card { border: 2px solid #0052CC; border-radius: 8px; padding: 16px; }
+  .card h3 { color: #0052CC; margin-top: 0; }
+</style>
+<div class="card">
+  <h3>Custom Styled Card</h3>
+  <p>This HTML is preserved verbatim by the HTML macro.</p>
+</div>
+:::
+```
+
+The macro name is auto-detected: `html-macro` for Confluence Cloud, `html` for Data Center/Server. Override with `--html-macro-name` or `html_macro_name` in front-matter.
+
+### Interactive JavaScript Applications
+
+`::: html` blocks can reference external JavaScript and CSS files. confpub automatically:
+
+1. **Discovers** `<script src="...">` and `<link href="...">` references inside `::: html` blocks
+2. **Uploads** the referenced files as page attachments
+3. **Rewrites** the URLs in the published HTML to point to the Confluence attachment download path
+
+```markdown
+::: html
+<div id="dashboard"></div>
+<script src="app.js"></script>
+:::
+```
+
+Place `app.js` next to the `.md` file. This pattern works for any single-file JavaScript application — bundle your TypeScript, React, or Vue app into a single `.js` file and reference it from a `::: html` block.
+
+Missing files produce warnings (not errors), so partial publishes still succeed.
 
 ---
 
@@ -465,6 +506,7 @@ confpub/
 ├── reverse_converter.py  # Confluence Storage Format → Markdown
 ├── manifest.py           # Manifest + plan artifact models
 ├── lockfile.py           # confpub.lock persistence
+├── html_macro_plugin.py  # ::: html block parser plugin
 ├── assets.py             # Asset discovery, upload, URL rewriting
 ├── planner.py            # plan.create
 ├── validator.py          # plan.validate

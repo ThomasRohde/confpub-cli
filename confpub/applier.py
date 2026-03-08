@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from confpub.assets import AssetRef, discover_assets, rewrite_image_urls, upload_assets
+from confpub.assets import AssetRef, discover_assets, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
 from confpub.config import load_config
 from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, fingerprint_content
@@ -126,6 +126,12 @@ def apply_plan(
                 if assets:
                     uploaded = upload_assets(client, new_id, assets)
                     storage = rewrite_image_urls(storage, uploaded)
+                    storage = rewrite_html_macro_urls(
+                        storage, uploaded,
+                        base_url=config.base_url or "",
+                        is_cloud=config.is_cloud,
+                        page_id=new_id,
+                    )
                     # Re-update page with rewritten URLs
                     if uploaded:
                         client.update_page(new_id, page.title, storage)
@@ -194,6 +200,12 @@ def apply_plan(
                 if assets:
                     uploaded = upload_assets(client, page.confluence_page_id, assets)
                     storage = rewrite_image_urls(storage, uploaded)
+                    storage = rewrite_html_macro_urls(
+                        storage, uploaded,
+                        base_url=config.base_url or "",
+                        is_cloud=config.is_cloud,
+                        page_id=page.confluence_page_id,
+                    )
                     client.update_page(page.confluence_page_id, page.title, storage)
                     change["attachments_added"] = [a.source_path for a in assets]
                     counts["attachments_upload"] += len(assets)

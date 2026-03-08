@@ -431,7 +431,15 @@ def build_guide() -> dict[str, Any]:
                     "Use this for custom CSS styling, dashboards, diagrams, embedded widgets, "
                     "or any HTML that Confluence would otherwise sanitize. "
                     "The macro name is auto-detected (Cloud=html-macro, DC=html) but can be "
-                    "overridden via --html-macro-name flag or html_macro_name front-matter field."
+                    "overridden via --html-macro-name flag or html_macro_name front-matter field. "
+                    "ASSET AUTO-DISCOVERY: <script src=\"app.js\"> and <link href=\"style.css\"> "
+                    "references inside ::: html blocks are automatically detected. The referenced "
+                    "files are uploaded as page attachments and the src/href URLs in the CDATA "
+                    "are rewritten to point to the Confluence attachment download path. "
+                    "This enables interactive JavaScript applications — bundle your app into a "
+                    "single .js file, reference it from a ::: html block, and confpub handles "
+                    "the rest. Missing files produce warnings (not errors) so partial publishes "
+                    "still succeed."
                 ),
                 "excerpt":          "::: excerpt hidden\\ncontent\\n::: → ac:structured-macro excerpt",
             },
@@ -451,7 +459,13 @@ def build_guide() -> dict[str, Any]:
                 "Example: ::: html\\n<style>.box { border: 1px solid blue; }</style>\\n"
                 "<div class=\"box\">Styled content</div>\\n::: "
                 "Multiple ::: html blocks can appear on the same page. "
-                "The macro name auto-detects Cloud vs DC — no configuration needed."
+                "The macro name auto-detects Cloud vs DC — no configuration needed. "
+                "INTERACTIVE APPS: To embed a JavaScript application, place the bundled .js file "
+                "next to the .md file, then reference it: ::: html\\n<div id=\"app\"></div>\\n"
+                "<script src=\"app.js\"></script>\\n::: — confpub auto-discovers the <script src>, "
+                "uploads app.js as a page attachment, and rewrites the URL in the CDATA block. "
+                "The same works for <link href=\"style.css\"> for external CSS. "
+                "Missing files produce warnings, not errors — the page still publishes."
             ),
             "html_macro_examples": [
                 {
@@ -491,6 +505,36 @@ def build_guide() -> dict[str, Any]:
                         "<iframe src=\"https://example.com/dashboard\" "
                         "width=\"100%\" height=\"400\" frameborder=\"0\"></iframe>\n"
                         ":::"
+                    ),
+                },
+                {
+                    "description": "Interactive JavaScript app (file auto-discovered and uploaded as attachment)",
+                    "markdown": (
+                        "::: html\n"
+                        "<div id=\"my-app\"></div>\n"
+                        "<script src=\"app.js\"></script>\n"
+                        ":::"
+                    ),
+                    "note": (
+                        "Place app.js next to the .md file. confpub auto-discovers the "
+                        "<script src>, uploads app.js as a page attachment, and rewrites "
+                        "the src URL to the Confluence attachment download path. "
+                        "Works with any bundled JS — TypeScript, React, Vue, etc."
+                    ),
+                },
+                {
+                    "description": "External CSS loaded from attachment",
+                    "markdown": (
+                        "::: html\n"
+                        "<link rel=\"stylesheet\" href=\"dashboard.css\" />\n"
+                        "<div class=\"dashboard\">\n"
+                        "  <div class=\"widget\">Content here</div>\n"
+                        "</div>\n"
+                        ":::"
+                    ),
+                    "note": (
+                        "Place dashboard.css next to the .md file. confpub uploads it "
+                        "and rewrites the href to the attachment URL."
                     ),
                 },
                 {

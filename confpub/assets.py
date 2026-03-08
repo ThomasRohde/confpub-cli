@@ -1,7 +1,8 @@
 """Asset discovery, upload, and URL rewriting.
 
-Finds image references in Markdown, uploads them as Confluence attachments,
-and rewrites the Storage Format output to reference the attachments.
+Finds image references in Markdown and resource references (script, link)
+in ::: html blocks, uploads them as Confluence attachments, and rewrites
+the Storage Format output to reference the attachments.
 """
 
 from __future__ import annotations
@@ -39,6 +40,24 @@ _STORAGE_IMAGE_RE = re.compile(
     r'<ac:image><ri:url ri:value="([^"]+)" /></ac:image>'
 )
 
+# Regex to find ::: html ... ::: blocks in markdown
+_HTML_BLOCK_RE = re.compile(
+    r"^:{3,}\s+html\s*$\n(.*?)^:{3,}\s*$",
+    re.MULTILINE | re.DOTALL | re.IGNORECASE,
+)
+
+# Regex to find <script src="..."> and <link href="..."> in HTML content
+_SCRIPT_SRC_RE = re.compile(r'<script\b[^>]*\bsrc=["\']([^"\']+)["\']', re.IGNORECASE)
+_LINK_HREF_RE = re.compile(r'<link\b[^>]*\bhref=["\']([^"\']+)["\']', re.IGNORECASE)
+
+# Regex to find local resource references in CDATA blocks (for rewriting)
+_CDATA_BLOCK_RE = re.compile(r"(<!\[CDATA\[)(.*?)(\]\]>)", re.DOTALL)
+
+
+def _is_local_path(src: str) -> bool:
+    """Check if a path is a local file reference (not a URL)."""
+    return not src.startswith(("http://", "https://", "//", "data:"))
+
 
 def discover_assets(
     md_text: str,
@@ -63,7 +82,7 @@ def discover_assets(
     for match in _MD_IMAGE_RE.finditer(md_text):
         src = match.group(2)
         # Skip URLs
-        if src.startswith(("http://", "https://", "//")):
+        if not _is_local_path(src):
             continue
         resolved = (base / src).resolve()
         key = str(resolved)
@@ -74,6 +93,24 @@ def discover_assets(
                 resolved_path=str(resolved),
                 filename=resolved.name,
             ))
+
+    # Find script/link references in ::: html blocks
+    for block_match in _HTML_BLOCK_RE.finditer(md_text):
+        html_content = block_match.group(1)
+        for pattern in (_SCRIPT_SRC_RE, _LINK_HREF_RE):
+            for ref_match in pattern.finditer(html_content):
+                src = ref_match.group(1)
+                if not _is_local_path(src):
+                    continue
+                resolved = (base / src).resolve()
+                key = str(resolved)
+                if key not in seen and resolved.is_file():
+                    seen.add(key)
+                    assets.append(AssetRef(
+                        source_path=src,
+                        resolved_path=str(resolved),
+                        filename=resolved.name,
+                    ))
 
     # Expand glob patterns from manifest
     if asset_globs:
@@ -92,6 +129,34 @@ def discover_assets(
                     ))
 
     return assets
+
+
+def discover_html_macro_warnings(
+    md_text: str,
+    base_dir: str | Path,
+) -> list[str]:
+    """Check ::: html blocks for local file references that don't exist on disk.
+
+    Returns a list of warning messages for missing files.
+    """
+    base = Path(base_dir)
+    warnings: list[str] = []
+
+    for block_match in _HTML_BLOCK_RE.finditer(md_text):
+        html_content = block_match.group(1)
+        for pattern, tag in ((_SCRIPT_SRC_RE, "script src"), (_LINK_HREF_RE, "link href")):
+            for ref_match in pattern.finditer(html_content):
+                src = ref_match.group(1)
+                if not _is_local_path(src):
+                    continue
+                resolved = (base / src).resolve()
+                if not resolved.is_file():
+                    warnings.append(
+                        f"HTML macro references missing file: <{tag}=\"{src}\"> "
+                        f"(resolved to {resolved})"
+                    )
+
+    return warnings
 
 
 def rewrite_image_urls(storage_format: str, uploaded_assets: list[UploadedAsset]) -> str:
@@ -122,6 +187,76 @@ def rewrite_image_urls(storage_format: str, uploaded_assets: list[UploadedAsset]
         return match.group(0)
 
     return _STORAGE_IMAGE_RE.sub(_replace, storage_format)
+
+
+def build_attachment_url(base_url: str, is_cloud: bool, page_id: str, filename: str) -> str:
+    """Build a download URL for a Confluence page attachment.
+
+    Args:
+        base_url: Confluence base URL (e.g. https://mysite.atlassian.net).
+        is_cloud: True for Confluence Cloud, False for DC/Server.
+        page_id: Confluence page ID.
+        filename: Attachment filename.
+
+    Returns:
+        Full download URL for the attachment.
+    """
+    base = base_url.rstrip("/")
+    if is_cloud:
+        if not base.endswith("/wiki"):
+            base += "/wiki"
+    return f"{base}/download/attachments/{page_id}/{filename}"
+
+
+def rewrite_html_macro_urls(
+    storage_format: str,
+    uploaded_assets: list[UploadedAsset],
+    base_url: str,
+    is_cloud: bool,
+    page_id: str,
+) -> str:
+    """Rewrite local file references inside HTML macro CDATA blocks to attachment URLs.
+
+    Transforms script src and link href pointing to local files into full
+    Confluence attachment download URLs.
+    """
+    if not uploaded_assets:
+        return storage_format
+
+    # Build lookups
+    by_source: dict[str, UploadedAsset] = {}
+    by_filename: dict[str, UploadedAsset] = {}
+    for asset in uploaded_assets:
+        by_source[asset.source_path] = asset
+        by_filename[asset.filename] = asset
+
+    def _find_asset(src: str) -> UploadedAsset | None:
+        asset = by_source.get(src)
+        if not asset:
+            asset = by_filename.get(Path(src).name)
+        return asset
+
+    def _rewrite_cdata(match: re.Match) -> str:
+        prefix = match.group(1)  # <![CDATA[
+        content = match.group(2)
+        suffix = match.group(3)  # ]]>
+
+        def _rewrite_attr(attr_match: re.Match) -> str:
+            full = attr_match.group(0)
+            src = attr_match.group(1)
+            if not _is_local_path(src):
+                return full
+            asset = _find_asset(src)
+            if asset:
+                url = build_attachment_url(base_url, is_cloud, page_id, asset.filename)
+                return full.replace(src, url)
+            return full
+
+        content = _SCRIPT_SRC_RE.sub(_rewrite_attr, content)
+        content = _LINK_HREF_RE.sub(_rewrite_attr, content)
+        return prefix + content + suffix
+
+    return _CDATA_BLOCK_RE.sub(_rewrite_cdata, storage_format)
 
 
 def upload_assets(
