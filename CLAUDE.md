@@ -12,9 +12,15 @@ pytest tests/test_converter.py::TestHeadings::test_h1 -v  # Run single test
 pytest tests/ -k "fingerprint" -v       # Run tests matching name pattern
 pytest tests/ -v --cov=confpub          # Run with coverage
 uvx hatch version minor                 # Bump version (patch/minor/major)
+python -m confpub <args>                # Run dev version of CLI (not the global install)
 ```
 
 No linter is configured. Python 3.10+ required.
+
+### Dev vs global CLI
+
+- **`confpub`** (in PATH) — global install via `uv tool install confpub-cli`. This is the production version from PyPI.
+- **`python -m confpub`** — runs from the local editable source. Use this for dev testing to ensure you're testing your local changes, not the globally installed version.
 
 ## Architecture
 
