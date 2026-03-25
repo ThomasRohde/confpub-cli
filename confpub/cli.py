@@ -733,6 +733,20 @@ def label_remove(
 # ---------------------------------------------------------------------------
 
 
+@comment_app.command("list")
+def comment_list(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    limit: int = typer.Option(25, "--limit", help="Maximum comments to return"),
+) -> None:
+    """List comments on a Confluence page."""
+    with command_context("comment.list", target={"page_id": page_id}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        comments = client.get_comments(page_id, limit=limit)
+        ctx.result = {"comments": comments, "count": len(comments)}
+
+
 @comment_app.command("add")
 def comment_add(
     page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),

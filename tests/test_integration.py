@@ -348,6 +348,13 @@ class TestCommentCommandHelp:
         result = runner.invoke(app, ["comment", "--help"])
         assert result.exit_code == 0
         assert "add" in result.output
+        assert "list" in result.output
+
+    def test_comment_list_help(self):
+        result = runner.invoke(app, ["comment", "list", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--limit" in result.output
 
     def test_comment_add_help(self):
         result = runner.invoke(app, ["comment", "add", "--help"])

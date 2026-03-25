@@ -343,6 +343,50 @@ class TestLabels:
 
 
 class TestComments:
+    def test_get_comments(self, client):
+        client._mock_api.get_page_comments.return_value = {
+            "results": [
+                {
+                    "id": "c1",
+                    "body": {"storage": {"value": "<p>First</p>"}},
+                    "history": {
+                        "createdBy": {"displayName": "Alice"},
+                        "createdDate": "2026-01-01T00:00:00.000Z",
+                    },
+                    "version": {"number": 1},
+                },
+                {
+                    "id": "c2",
+                    "body": {"storage": {"value": "<p>Second</p>"}},
+                    "history": {
+                        "createdBy": {"displayName": "Bob"},
+                        "createdDate": "2026-01-02T00:00:00.000Z",
+                    },
+                    "version": {"number": 1},
+                },
+            ]
+        }
+        comments = client.get_comments("123")
+        assert len(comments) == 2
+        assert comments[0]["id"] == "c1"
+        assert comments[0]["body_storage"] == "<p>First</p>"
+        assert comments[0]["created_by"] == "Alice"
+        assert comments[1]["id"] == "c2"
+        client._mock_api.get_page_comments.assert_called_once_with(
+            "123", expand="body.storage,version,history", depth="all", limit=25,
+        )
+
+    def test_get_comments_empty(self, client):
+        client._mock_api.get_page_comments.return_value = {"results": []}
+        comments = client.get_comments("123")
+        assert comments == []
+
+    def test_get_comments_error(self, client):
+        client._mock_api.get_page_comments.side_effect = Exception("403 Forbidden")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.get_comments("123")
+        assert exc_info.value.code == ERR_AUTH_FORBIDDEN
+
     def test_add_comment(self, client):
         client._mock_api.add_comment.return_value = {"id": "comment_1"}
         result = client.add_comment("123", "<p>Nice page!</p>")

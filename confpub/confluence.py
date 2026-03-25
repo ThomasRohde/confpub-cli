@@ -502,6 +502,33 @@ class ConfluenceClient:
     # Comment operations
     # ------------------------------------------------------------------
 
+    def get_comments(self, page_id: str, *, limit: int = 25) -> list[dict[str, Any]]:
+        """Return comments on a page."""
+        self._call_count += 1
+        try:
+            response = self._api.get_page_comments(
+                page_id,
+                expand="body.storage,version,history",
+                depth="all",
+                limit=limit,
+            )
+            results = response.get("results", []) if isinstance(response, dict) else []
+            comments = []
+            for c in results:
+                history = c.get("history", {})
+                created_by = history.get("createdBy", {})
+                comments.append({
+                    "id": c.get("id"),
+                    "body_storage": (c.get("body", {}).get("storage", {}).get("value", "")),
+                    "created_by": created_by.get("displayName", created_by.get("username", "")),
+                    "created_date": history.get("createdDate", ""),
+                    "version": c.get("version", {}).get("number"),
+                })
+            return comments
+        except Exception as exc:
+            self._handle_error(exc, "get_comments")
+            return []
+
     def add_comment(self, page_id: str, body: str) -> dict[str, Any]:
         """Add a comment to a page."""
         self._call_count += 1
