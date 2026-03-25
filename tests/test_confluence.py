@@ -402,6 +402,163 @@ class TestComments:
         assert exc_info.value.code == ERR_AUTH_FORBIDDEN
 
 
+class TestPageProperties:
+    def test_get_page_properties(self, client):
+        client._mock_api.get_page_properties.return_value = {
+            "results": [
+                {"key": "status", "value": "draft", "version": {"number": 1}},
+                {"key": "owner", "value": {"name": "alice"}, "version": {"number": 2}},
+            ]
+        }
+        props = client.get_page_properties("123")
+        assert len(props) == 2
+        assert props[0] == {"key": "status", "value": "draft", "version": 1}
+        assert props[1] == {"key": "owner", "value": {"name": "alice"}, "version": 2}
+
+    def test_get_page_properties_empty(self, client):
+        client._mock_api.get_page_properties.return_value = {"results": []}
+        assert client.get_page_properties("123") == []
+
+    def test_get_page_property(self, client):
+        client._mock_api.get_page_property.return_value = {
+            "key": "status", "value": "published", "version": {"number": 3},
+        }
+        result = client.get_page_property("123", "status")
+        assert result["key"] == "status"
+        assert result["value"] == "published"
+        assert result["version"] == 3
+        assert result["page_id"] == "123"
+
+    def test_get_page_property_error(self, client):
+        client._mock_api.get_page_property.side_effect = Exception("404 Not Found")
+        with pytest.raises(ConfpubError):
+            client.get_page_property("123", "missing")
+
+    def test_set_page_property_create(self, client):
+        client._mock_api.set_page_property.return_value = {}
+        result = client.set_page_property("123", "status", "draft")
+        assert result["created"] is True
+        assert result["key"] == "status"
+        assert result["version"] == 1
+
+    def test_set_page_property_update_with_version(self, client):
+        client._mock_api.update_page_property.return_value = {}
+        result = client.set_page_property("123", "status", "published", version=2)
+        assert result["created"] is False
+        assert result["version"] == 2
+
+    def test_delete_page_property(self, client):
+        client._mock_api.delete_page_property.return_value = {}
+        result = client.delete_page_property("123", "status")
+        assert result["deleted"] is True
+        assert result["key"] == "status"
+
+    def test_delete_page_property_error(self, client):
+        client._mock_api.delete_page_property.side_effect = Exception("404 Not Found")
+        with pytest.raises(ConfpubError):
+            client.delete_page_property("123", "missing")
+
+
+class TestPageHistory:
+    def test_get_page_history(self, client):
+        client._mock_api.get_page_by_id.return_value = {"version": {"number": 2}}
+        client._mock_api.get_content_history_by_version_number.side_effect = [
+            {"number": 2, "when": "2026-01-02", "by": {"displayName": "Bob"}, "message": "update"},
+            {"number": 1, "when": "2026-01-01", "by": {"displayName": "Alice"}, "message": "created"},
+        ]
+        versions = client.get_page_history("123", limit=25)
+        assert len(versions) == 2
+        assert versions[0]["number"] == 2
+        assert versions[0]["by"] == "Bob"
+        assert versions[1]["number"] == 1
+
+    def test_get_page_history_error(self, client):
+        client._mock_api.get_page_by_id.side_effect = Exception("403 Forbidden")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.get_page_history("123")
+        assert exc_info.value.code == ERR_AUTH_FORBIDDEN
+
+    def test_get_page_version(self, client):
+        client._mock_api.get_content_history_by_version_number.return_value = {
+            "number": 1, "when": "2026-01-01", "by": {"displayName": "Alice"}, "message": "created",
+        }
+        client._mock_api.get_page_by_id.return_value = {
+            "title": "Test", "body": {"storage": {"value": "<p>Hello</p>"}}, "version": {"number": 1},
+        }
+        result = client.get_page_version("123", 1)
+        assert result["version"] == 1
+        assert result["by"] == "Alice"
+        assert result["title"] == "Test"
+        assert result["body_storage"] == "<p>Hello</p>"
+
+
+class TestExportPage:
+    def test_export_pdf(self, client, tmp_path):
+        client._mock_api.get_page_as_pdf.return_value = b"%PDF-1.4 fake content"
+        output = str(tmp_path / "test.pdf")
+        result = client.export_page("123", "pdf", output)
+        assert result["exported"] is True
+        assert result["format"] == "pdf"
+        assert result["file_size"] > 0
+
+    def test_export_word(self, client, tmp_path):
+        client._mock_api.get_page_as_word.return_value = b"PK fake docx"
+        output = str(tmp_path / "test.docx")
+        result = client.export_page("123", "word", output)
+        assert result["exported"] is True
+        assert result["format"] == "word"
+
+    def test_export_invalid_format(self, client, tmp_path):
+        output = str(tmp_path / "test.txt")
+        with pytest.raises(ConfpubError):
+            client.export_page("123", "html", output)
+
+
+class TestDeleteAttachment:
+    def test_delete_attachment(self, client):
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"id": "att1", "title": "image.png"}],
+        }
+        client._mock_api.remove_content.return_value = {}
+        result = client.delete_attachment("123", "image.png")
+        assert result["deleted"] is True
+        assert result["filename"] == "image.png"
+        assert result["attachment_id"] == "att1"
+
+    def test_delete_attachment_not_found(self, client):
+        client._mock_api.get_attachments_from_content.return_value = {"results": []}
+        with pytest.raises(ConfpubError):
+            client.delete_attachment("123", "missing.png")
+
+    def test_delete_attachment_error(self, client):
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"id": "att1", "title": "image.png"}],
+        }
+        client._mock_api.remove_content.side_effect = Exception("403 Forbidden")
+        with pytest.raises(ConfpubError):
+            client.delete_attachment("123", "image.png")
+
+
+class TestGetSpace:
+    def test_get_space(self, client):
+        client._mock_api.get_space.return_value = {
+            "id": "1", "key": "SD", "name": "Software Dev", "type": "global",
+            "description": {"plain": {"value": "A space"}},
+            "homepage": {"id": "100", "title": "Home"},
+            "_links": {"webui": "/spaces/SD"},
+        }
+        result = client.get_space("SD")
+        assert result["key"] == "SD"
+        assert result["name"] == "Software Dev"
+        assert result["homepage_id"] == "100"
+        assert result["homepage_title"] == "Home"
+
+    def test_get_space_error(self, client):
+        client._mock_api.get_space.side_effect = Exception("404 Not Found")
+        with pytest.raises(ConfpubError):
+            client.get_space("MISSING")
+
+
 class TestMovePage:
     def test_move_page_by_title(self, client):
         client._mock_api.move_page.return_value = {"page": {"id": "123"}}

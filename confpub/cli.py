@@ -61,6 +61,7 @@ space_app = typer.Typer(help="Space operations", callback=_group_callback)
 attachment_app = typer.Typer(help="Attachment operations", callback=_group_callback)
 label_app = typer.Typer(help="Label operations", callback=_group_callback)
 comment_app = typer.Typer(help="Comment operations", callback=_group_callback)
+property_app = typer.Typer(help="Page property operations", callback=_group_callback)
 
 # ---------------------------------------------------------------------------
 # Main app
@@ -80,6 +81,7 @@ app.add_typer(space_app, name="space")
 app.add_typer(attachment_app, name="attachment")
 app.add_typer(label_app, name="label")
 app.add_typer(comment_app, name="comment")
+app.add_typer(property_app, name="property")
 
 
 def _version_callback(value: bool) -> None:
@@ -787,6 +789,186 @@ def comment_add(
         ctx.client = client
         result = client.add_comment(page_id, storage_body)
         ctx.result = result
+
+
+# ---------------------------------------------------------------------------
+# Property commands
+# ---------------------------------------------------------------------------
+
+
+@property_app.command("list")
+def property_list(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+) -> None:
+    """List all properties on a Confluence page."""
+    with command_context("property.list", target={"page_id": page_id}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        props = client.get_page_properties(page_id)
+        ctx.result = {"properties": props, "count": len(props)}
+
+
+@property_app.command("get")
+def property_get(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    key: str = typer.Option(..., "--key", help="Property key"),
+) -> None:
+    """Get a single property from a Confluence page."""
+    with command_context("property.get", target={"page_id": page_id, "key": key}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        ctx.result = client.get_page_property(page_id, key)
+
+
+@property_app.command("set")
+def property_set(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    key: str = typer.Option(..., "--key", help="Property key"),
+    value: str = typer.Option(..., "--value", help="Property value (JSON string or plain text)"),
+) -> None:
+    """Set a property on a Confluence page (create or update)."""
+    with command_context("property.set", target={"page_id": page_id, "key": key}) as ctx:
+        import json as _json
+        try:
+            parsed_value = _json.loads(value)
+        except (ValueError, TypeError):
+            parsed_value = value
+
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        ctx.result = client.set_page_property(page_id, key, parsed_value)
+
+
+@property_app.command("delete")
+def property_delete(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    key: str = typer.Option(..., "--key", help="Property key to delete"),
+) -> None:
+    """Delete a property from a Confluence page."""
+    with command_context("property.delete", target={"page_id": page_id, "key": key}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        ctx.result = client.delete_page_property(page_id, key)
+
+
+# ---------------------------------------------------------------------------
+# Page history / version commands (added to page_app)
+# ---------------------------------------------------------------------------
+
+
+@page_app.command("history")
+def page_history(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    limit: int = typer.Option(25, "--limit", help="Maximum versions to return"),
+) -> None:
+    """Show version history of a Confluence page."""
+    with command_context("page.history", target={"page_id": page_id}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        versions = client.get_page_history(page_id, limit=limit)
+        ctx.result = {"versions": versions, "count": len(versions)}
+
+
+@page_app.command("version")
+def page_version(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    version_number: int = typer.Option(..., "--version-number", help="Version number to retrieve"),
+) -> None:
+    """Get a specific version of a Confluence page."""
+    with command_context("page.version", target={"page_id": page_id, "version": version_number}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        ctx.result = client.get_page_version(page_id, version_number)
+
+
+# ---------------------------------------------------------------------------
+# Page export command (added to page_app)
+# ---------------------------------------------------------------------------
+
+
+@page_app.command("export")
+def page_export(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    fmt: str = typer.Option(..., "--format", help="Export format: pdf or word"),
+    output: str = typer.Option(..., "--output", help="Output file path"),
+) -> None:
+    """Export a Confluence page as PDF or Word."""
+    with command_context("page.export", target={"page_id": page_id, "format": fmt}) as ctx:
+        if fmt not in ("pdf", "word"):
+            raise ConfpubError("ERR_VALIDATION_REQUIRED", f"--format must be 'pdf' or 'word', got '{fmt}'")
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        ctx.result = client.export_page(page_id, fmt, output)
+
+
+# ---------------------------------------------------------------------------
+# Attachment download / delete commands (added to attachment_app)
+# ---------------------------------------------------------------------------
+
+
+@attachment_app.command("download")
+def attachment_download(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    filename: str = typer.Option(..., "--filename", help="Attachment filename"),
+    output: str = typer.Option(..., "--output", help="Output file path"),
+) -> None:
+    """Download an attachment from a Confluence page."""
+    with command_context("attachment.download", target={"page_id": page_id, "filename": filename}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        success = client.download_attachment(page_id, filename, output)
+        if not success:
+            from confpub.errors import ERR_VALIDATION_NOT_FOUND
+            raise ConfpubError(ERR_VALIDATION_NOT_FOUND, f"Attachment '{filename}' not found on page {page_id}")
+        import os
+        file_size = os.path.getsize(output) if os.path.exists(output) else 0
+        ctx.result = {
+            "downloaded": True,
+            "page_id": page_id,
+            "filename": filename,
+            "output_path": os.path.abspath(output),
+            "file_size": file_size,
+        }
+
+
+@attachment_app.command("delete")
+def attachment_delete_cmd(
+    page_id: str = typer.Option(..., "--page-id", help="Confluence page ID"),
+    filename: str = typer.Option(..., "--filename", help="Attachment filename to delete"),
+) -> None:
+    """Delete an attachment from a Confluence page."""
+    with command_context("attachment.delete", target={"page_id": page_id, "filename": filename}) as ctx:
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        ctx.result = client.delete_attachment(page_id, filename)
+
+
+# ---------------------------------------------------------------------------
+# Space inspect command (added to space_app)
+# ---------------------------------------------------------------------------
+
+
+@space_app.command("inspect")
+def space_inspect(
+    space: str = typer.Option(..., "--space", help="Confluence space key"),
+) -> None:
+    """Get detailed information about a Confluence space."""
+    with command_context("space.inspect", target={"space": space}) as ctx:
+        from confpub.errors import validate_space_key
+        validate_space_key(space)
+        from confpub.confluence import build_client
+        client = build_client()
+        ctx.client = client
+        ctx.result = client.get_space(space)
 
 
 # ---------------------------------------------------------------------------

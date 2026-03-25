@@ -369,6 +369,108 @@ class TestCommentCommandHelp:
         assert "comment" in result.output
 
 
+class TestPropertyCommandHelp:
+    def test_property_help(self):
+        result = runner.invoke(app, ["property", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.output
+        assert "get" in result.output
+        assert "set" in result.output
+        assert "delete" in result.output
+
+    def test_property_list_help(self):
+        result = runner.invoke(app, ["property", "list", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+
+    def test_property_get_help(self):
+        result = runner.invoke(app, ["property", "get", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--key" in result.output
+
+    def test_property_set_help(self):
+        result = runner.invoke(app, ["property", "set", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--key" in result.output
+        assert "--value" in result.output
+
+    def test_property_delete_help(self):
+        result = runner.invoke(app, ["property", "delete", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--key" in result.output
+
+    def test_property_in_main_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "property" in result.output
+
+
+class TestPageHistoryHelp:
+    def test_page_history_help(self):
+        result = runner.invoke(app, ["page", "history", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--limit" in result.output
+
+    def test_page_version_help(self):
+        result = runner.invoke(app, ["page", "version", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--version-number" in result.output
+
+    def test_history_in_page_help(self):
+        result = runner.invoke(app, ["page", "--help"])
+        assert result.exit_code == 0
+        assert "history" in result.output
+        assert "version" in result.output
+        assert "export" in result.output
+
+
+class TestPageExportHelp:
+    def test_page_export_help(self):
+        result = runner.invoke(app, ["page", "export", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--format" in result.output
+        assert "--output" in result.output
+
+
+class TestAttachmentDownloadDeleteHelp:
+    def test_attachment_download_help(self):
+        result = runner.invoke(app, ["attachment", "download", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--filename" in result.output
+        assert "--output" in result.output
+
+    def test_attachment_delete_help(self):
+        result = runner.invoke(app, ["attachment", "delete", "--help"])
+        assert result.exit_code == 0
+        assert "--page-id" in result.output
+        assert "--filename" in result.output
+
+    def test_attachment_commands_in_help(self):
+        result = runner.invoke(app, ["attachment", "--help"])
+        assert result.exit_code == 0
+        assert "download" in result.output
+        assert "delete" in result.output
+
+
+class TestSpaceInspectHelp:
+    def test_space_inspect_help(self):
+        result = runner.invoke(app, ["space", "inspect", "--help"])
+        assert result.exit_code == 0
+        assert "--space" in result.output
+
+    def test_space_inspect_in_space_help(self):
+        result = runner.invoke(app, ["space", "--help"])
+        assert result.exit_code == 0
+        assert "inspect" in result.output
+
+
 class TestPageMoveHelp:
     def test_page_move_help(self):
         result = runner.invoke(app, ["page", "move", "--help"])

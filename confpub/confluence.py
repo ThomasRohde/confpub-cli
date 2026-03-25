@@ -582,6 +582,237 @@ class ConfluenceClient:
             return {}
 
     # ------------------------------------------------------------------
+    # Page properties
+    # ------------------------------------------------------------------
+
+    def get_page_properties(self, page_id: str) -> list[dict[str, Any]]:
+        """List all properties on a page."""
+        self._call_count += 1
+        try:
+            response = self._api.get_page_properties(page_id)
+            results = response.get("results", []) if isinstance(response, dict) else []
+            return [
+                {
+                    "key": p.get("key"),
+                    "value": p.get("value"),
+                    "version": p.get("version", {}).get("number") if isinstance(p.get("version"), dict) else None,
+                }
+                for p in results
+            ]
+        except Exception as exc:
+            self._handle_error(exc, "get_page_properties")
+            return []
+
+    def get_page_property(self, page_id: str, key: str) -> dict[str, Any]:
+        """Get a single property by key."""
+        self._call_count += 1
+        try:
+            result = self._api.get_page_property(page_id, key)
+            return {
+                "key": result.get("key"),
+                "value": result.get("value"),
+                "version": result.get("version", {}).get("number") if isinstance(result.get("version"), dict) else None,
+                "page_id": page_id,
+            }
+        except Exception as exc:
+            self._handle_error(exc, "get_page_property")
+            return {}
+
+    def set_page_property(self, page_id: str, key: str, value: Any, *, version: int | None = None) -> dict[str, Any]:
+        """Create or update a page property.
+
+        If version is provided, performs an update (PUT). Otherwise attempts
+        create (POST), falling back to update if the key already exists.
+        """
+        self._call_count += 1
+        try:
+            if version is not None:
+                # Explicit update
+                data = {"key": key, "value": value, "version": {"number": version}}
+                self._api.update_page_property(page_id, data)
+                return {"key": key, "value": value, "version": version, "page_id": page_id, "created": False}
+
+            # Try create first
+            data = {"key": key, "value": value}
+            try:
+                self._api.set_page_property(page_id, data)
+                return {"key": key, "value": value, "version": 1, "page_id": page_id, "created": True}
+            except Exception:
+                # Key may already exist — fetch current version and update
+                self._call_count += 1
+                existing = self._api.get_page_property(page_id, key)
+                current_version = existing.get("version", {}).get("number", 1) if isinstance(existing, dict) else 1
+                new_version = current_version + 1
+                update_data = {"key": key, "value": value, "version": {"number": new_version}}
+                self._api.update_page_property(page_id, update_data)
+                return {"key": key, "value": value, "version": new_version, "page_id": page_id, "created": False}
+        except Exception as exc:
+            self._handle_error(exc, "set_page_property")
+            return {}
+
+    def delete_page_property(self, page_id: str, key: str) -> dict[str, Any]:
+        """Delete a page property by key."""
+        self._call_count += 1
+        try:
+            self._api.delete_page_property(page_id, key)
+            return {"deleted": True, "key": key, "page_id": page_id}
+        except Exception as exc:
+            self._handle_error(exc, "delete_page_property")
+            return {}
+
+    # ------------------------------------------------------------------
+    # Page history / versions
+    # ------------------------------------------------------------------
+
+    def get_page_history(self, page_id: str, *, limit: int = 25) -> list[dict[str, Any]]:
+        """Get version history of a page."""
+        self._call_count += 1
+        try:
+            # history() returns the full history object; we also need individual versions
+            page = self._api.get_page_by_id(page_id, expand="version,history")
+            current_version = page.get("version", {}).get("number", 1) if isinstance(page, dict) else 1
+
+            versions = []
+            # Fetch individual versions from newest to oldest
+            for v in range(current_version, max(0, current_version - limit), -1):
+                self._call_count += 1
+                try:
+                    ver = self._api.get_content_history_by_version_number(page_id, v)
+                    if isinstance(ver, dict):
+                        by = ver.get("by", {})
+                        versions.append({
+                            "number": ver.get("number", v),
+                            "when": ver.get("when", ""),
+                            "by": by.get("displayName", by.get("username", "")) if isinstance(by, dict) else "",
+                            "message": ver.get("message", ""),
+                        })
+                except Exception:
+                    pass  # skip versions we can't access
+            return versions
+        except Exception as exc:
+            self._handle_error(exc, "get_page_history")
+            return []
+
+    def get_page_version(self, page_id: str, version_number: int) -> dict[str, Any]:
+        """Get a specific version of a page with its body."""
+        self._call_count += 1
+        try:
+            ver = self._api.get_content_history_by_version_number(page_id, version_number)
+            if not isinstance(ver, dict):
+                from confpub.errors import ERR_VALIDATION_NOT_FOUND
+                raise ConfpubError(ERR_VALIDATION_NOT_FOUND, f"Version {version_number} not found for page {page_id}")
+
+            by = ver.get("by", {})
+            result: dict[str, Any] = {
+                "id": page_id,
+                "version": ver.get("number", version_number),
+                "when": ver.get("when", ""),
+                "by": by.get("displayName", by.get("username", "")) if isinstance(by, dict) else "",
+                "message": ver.get("message", ""),
+            }
+
+            # Try to get the body at this version
+            self._call_count += 1
+            try:
+                page = self._api.get_page_by_id(page_id, expand="body.storage,version", version=version_number)
+                if isinstance(page, dict):
+                    result["title"] = page.get("title", "")
+                    result["body_storage"] = page.get("body", {}).get("storage", {}).get("value", "")
+            except Exception:
+                pass  # body retrieval is best-effort
+
+            return result
+        except ConfpubError:
+            raise
+        except Exception as exc:
+            self._handle_error(exc, "get_page_version")
+            return {}
+
+    # ------------------------------------------------------------------
+    # Export
+    # ------------------------------------------------------------------
+
+    def export_page(self, page_id: str, fmt: str, output_path: str) -> dict[str, Any]:
+        """Export a page as PDF or Word and write to output_path."""
+        self._call_count += 1
+        import os
+        try:
+            if fmt == "pdf":
+                content = self._api.get_page_as_pdf(page_id)
+            elif fmt == "word":
+                content = self._api.get_page_as_word(page_id)
+            else:
+                raise ConfpubError(ERR_VALIDATION_REQUIRED, f"Unsupported export format: {fmt}")
+
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            with open(output_path, "wb") as f:
+                f.write(content)
+            file_size = os.path.getsize(output_path)
+            return {
+                "exported": True,
+                "page_id": page_id,
+                "format": fmt,
+                "output_path": os.path.abspath(output_path),
+                "file_size": file_size,
+            }
+        except ConfpubError:
+            raise
+        except Exception as exc:
+            self._handle_error(exc, "export_page")
+            return {}
+
+    # ------------------------------------------------------------------
+    # Attachment delete
+    # ------------------------------------------------------------------
+
+    def delete_attachment(self, page_id: str, filename: str) -> dict[str, Any]:
+        """Delete an attachment from a page by filename."""
+        self._call_count += 1
+        try:
+            # Find the attachment ID by filename
+            attachments = self.get_attachments(page_id)
+            target = None
+            for att in attachments:
+                if att.get("title") == filename:
+                    target = att
+                    break
+            if target is None:
+                from confpub.errors import ERR_VALIDATION_NOT_FOUND
+                raise ConfpubError(
+                    ERR_VALIDATION_NOT_FOUND,
+                    f"Attachment '{filename}' not found on page {page_id}",
+                )
+            att_id = target.get("id")
+            self._api.remove_content(att_id)
+            return {"deleted": True, "page_id": page_id, "filename": filename, "attachment_id": att_id}
+        except ConfpubError:
+            raise
+        except Exception as exc:
+            self._handle_error(exc, "delete_attachment")
+            return {}
+
+    # ------------------------------------------------------------------
+    # Space details
+    # ------------------------------------------------------------------
+
+    def get_space(self, space_key: str) -> dict[str, Any]:
+        """Get detailed information about a space."""
+        self._call_count += 1
+        try:
+            result = self._api.get_space(space_key, expand="description.plain,homepage")
+            base_url = self._config.base_url.rstrip("/") if self._config.base_url else ""
+            space = _slim_space(result, base_url=base_url, is_cloud=self._config.is_cloud)
+            # Add homepage info
+            homepage = result.get("homepage", {}) if isinstance(result, dict) else {}
+            if isinstance(homepage, dict) and homepage.get("id"):
+                space["homepage_id"] = homepage.get("id")
+                space["homepage_title"] = homepage.get("title")
+            return space
+        except Exception as exc:
+            self._handle_error(exc, "get_space")
+            return {}
+
+    # ------------------------------------------------------------------
     # Fingerprinting
     # ------------------------------------------------------------------
 
