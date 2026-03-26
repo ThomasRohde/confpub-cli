@@ -18,6 +18,7 @@ labels:
 ::: panel Metadata
 | Field | Value |
 |-------|-------|
+| **Purpose** | Proposal seeking cross-team feedback before a decision |
 | **Author** | @author |
 | **Status** | {status:Open for Comments\|colour=Blue} |
 | **Created** | 2026-03-15 |
@@ -43,20 +44,20 @@ The core of what you want to do. Be specific and concrete.
 
 | Area | Impact | Details |
 |------|--------|---------|
-| Performance | {status:Low\|colour=Green} | No expected regression |
-| Security | {status:Medium\|colour=Yellow} | New API needs auth review |
-| Cost | {status:High\|colour=Red} | ~$5K/month additional infra |
-| Teams affected | {status:Medium\|colour=Yellow} | Platform, Mobile |
+| Performance | {status:Low\|colour=Green} | Benchmarks show no regression (assumption — verify under load) |
+| Security | {status:Medium\|colour=Yellow} | New API endpoint requires auth review before launch |
+| Cost | {status:High\|colour=Red} | Estimated ~$5K/month additional infra (based on current pricing) |
+| Teams affected | {status:Medium\|colour=Yellow} | Platform and Mobile teams must update client integrations |
 
 ## Migration Plan
 
-Phased rollout with milestones and rollback criteria.
+Describe each phase as a numbered step with a milestone and rollback trigger. Each step should produce a verifiable result before the next begins.
 
 ## Feedback
 
 > [!NOTE]
-> Leave comments directly on this page. Inline comments on specific
-> sections preferred over general page comments.
+> Leave comments directly on this page. Prefer inline comments on specific
+> sections over general page comments.
 
 - [ ] Platform team review
 - [ ] Security review
@@ -75,6 +76,6 @@ Phased rollout with milestones and rollback criteria.
 
 ## Tips
 
-- The Impact Assessment table with status lozenges is the key differentiator — it lets stakeholders quickly assess whether this RFC affects them.
+- The Impact Assessment table with status lozenges lets stakeholders scan for areas that affect their team without reading the full proposal.
 - Set a deadline. Open-ended RFCs never close.
-- The TL;DR section is critical — many stakeholders will read nothing else.
+- Most stakeholders read only the TL;DR. Write it so a VP can approve or redirect without reading further.

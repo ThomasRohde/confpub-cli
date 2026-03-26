@@ -30,7 +30,7 @@ labels:
 
 ## Description
 
-What is changing and why. Link to the driving feature or incident.
+State the concrete change (what) and the business or technical reason (why). Link to the originating Jira ticket, feature request, or incident.
 
 ## Impact Assessment
 
@@ -43,11 +43,11 @@ What is changing and why. Link to the driving feature or incident.
 
 ## Implementation Plan
 
-1. Run migration in staging, measure duration
-2. Take database snapshot
-3. Execute `ALTER TABLE` and `CREATE INDEX CONCURRENTLY`
-4. Verify index and query plans
-5. Update application config
+1. Run migration in staging — confirm it completes in < 10 min and logs no errors
+2. Take database snapshot — verify snapshot status shows `available`
+3. Execute `ALTER TABLE` and `CREATE INDEX CONCURRENTLY` — confirm `ALTER TABLE` returns without error
+4. Run `EXPLAIN ANALYZE` on key queries — confirm the new index appears in the plan
+5. Update application config and deploy — verify health check returns 200
 
 ## Rollback Plan
 
@@ -78,6 +78,6 @@ ALTER TABLE transactions DROP COLUMN IF EXISTS payment_method;
 
 ## Tips
 
-- Rollback plan with `> [!WARNING]` about data implications is essential.
+- Always include a rollback plan with `> [!WARNING]` stating data-loss consequences — reviewers reject CRs without one.
 - Task list for approvals creates a visible sign-off trail.
-- Link to the Jira ticket or feature that drives the change.
+- Link to the Jira ticket or feature that drives the change so reviewers can trace the motivation.

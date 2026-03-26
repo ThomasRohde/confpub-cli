@@ -52,7 +52,7 @@ What specific problem? Include impact metrics.
 
 ## System Context
 
-How this fits into the broader system. Embed a diagram if helpful.
+How this fits into the broader system. Include a diagram showing service boundaries and data flow.
 
 ## Detailed Design
 
@@ -84,25 +84,30 @@ Why rejected, with specific technical reasoning.
 :::
 
 ::: expand Option C: Another Alternative
-Why rejected.
+Why rejected, with specific technical reasoning.
 :::
 
 ## Security Considerations
 
-> [!CAUTION]
-> Authentication, authorization, data exposure, input validation.
-> Link to threat model if one exists.
+- **Authentication:** How callers authenticate (tokens, mTLS, OAuth scopes)
+- **Authorization:** Access control model and enforcement point
+- **Data exposure:** Sensitive fields, PII handling, encryption at rest/in transit
+- **Input validation:** Untrusted inputs and sanitization approach
+- Link to threat model if one exists
 
 ## Operational Considerations
 
-- **Monitoring:** Metrics and alerts needed
-- **Rollback:** How to undo if something goes wrong
-- **Migration:** Data migration required
-- **Performance:** Expected load and resource needs
+| Concern | Details |
+|---------|---------|
+| Monitoring | Metrics and alerts needed |
+| Rollback | How to reverse the deployment and any data changes |
+| Migration | Data migration steps and backward compatibility |
+| Performance | Expected load (QPS, payload size) and resource budget |
 
 ## Open Questions
 
 - [ ] Question 1 — assigned to @person
+- [ ] Question 2 — assigned to @person
 - [x] Question 3 — resolved: using approach X
 
 ## References
@@ -113,6 +118,6 @@ Why rejected.
 
 ## Tips
 
-- The Goals/Non-Goals layout is one of the most valuable elements — it prevents scope creep visually.
+- The Goals/Non-Goals layout prevents scope creep by making boundaries visible at a glance.
 - Use expand blocks for rejected alternatives so readers can skip them but reviewers can dig in.
 - The Authors & Reviewers table with status lozenges creates a lightweight approval workflow.

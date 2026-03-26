@@ -1,6 +1,6 @@
 # Pattern: Service Catalog Entry
 
-Standard template for documenting a service in the organization's catalog.
+Template for a service entry in the organization's catalog.
 
 **Labels:** `service-catalog`, plus team/domain label
 
@@ -18,6 +18,7 @@ labels:
 ::: panel Quick Facts
 | | |
 |---|---|
+| **Purpose** | Catalog entry for the payment-service: ownership, SLOs, dependencies, and runbooks |
 | **Owner** | Squad Payments (@payments-lead) |
 | **Slack** | #payments-support |
 | **On-call** | PagerDuty: payments-oncall |
@@ -76,6 +77,6 @@ Integrates with Stripe and Adyen with automatic failover.
 ## Tips
 
 - The excerpt block lets other pages include the service summary via `{excerpt-include:...}`.
-- Two-column Dependencies layout shows the service's position in the architecture.
-- SLO table with lozenges gives instant health visibility.
+- Two-column Dependencies layout shows what the service consumes and who consumes it, side by side.
+- SLO table with lozenges lets readers check service health without reading prose.
 - `{children}` at the bottom auto-lists sub-pages (runbooks, API docs, etc.).

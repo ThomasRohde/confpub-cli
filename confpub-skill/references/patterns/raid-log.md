@@ -15,8 +15,10 @@ labels:
 
 # RAID Log: Project Name {status:Active|colour=Blue}
 
-::: panel Last Updated
-2026-03-20 by @project-manager
+::: panel Project RAID Log
+**Owner:** @project-manager | **Status:** {status:Active|colour=Blue} | **Last reviewed:** 2026-03-20
+
+Tracks risks, assumptions, issues, and dependencies for Project Name. Review weekly at the project status meeting.
 :::
 
 {toc:maxLevel=2}
@@ -58,4 +60,4 @@ labels:
 - Status lozenges in every table make the RAID scannable at a glance.
 - The Assumptions table with validated status prevents "we assumed X" surprises.
 - Link Issues to Jira tickets for tracking.
-- Update the "Last Updated" panel to signal freshness — stale RAIDs are misleading.
+- Update the panel date after each review so readers know the log is current.

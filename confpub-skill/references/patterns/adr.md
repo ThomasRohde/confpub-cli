@@ -18,8 +18,8 @@ labels:
 {toc:maxLevel=2}
 
 ::: panel Context
-Brief description of the forces at play — what problem we're solving,
-what constraints exist, and why this decision matters now.
+What problem triggered this decision, what constraints apply,
+and why the team must decide now.
 :::
 
 ## Decision Drivers
@@ -43,11 +43,11 @@ what constraints exist, and why this decision matters now.
 ## Consequences
 
 > [!TIP]
-> **Positive:** Leverages existing expertise. Mature monitoring ecosystem.
+> **Positive:** Uses existing team expertise. Mature monitoring ecosystem.
 
 > [!WARNING]
 > **Risks:** Write throughput ceiling at ~50K TPS. Revisit if exceeded
-> within 18 months. Mitigation: partition by tenant ID.
+> within 18 months. **Mitigation:** partition by tenant ID.
 
 ## Action Items
 
@@ -74,5 +74,5 @@ what constraints exist, and why this decision matters now.
 ## Tips
 
 - ADRs are immutable once accepted. To change a decision, create a new ADR that supersedes the old one and update the old one's status to Deprecated/Superseded.
-- Use the Options table for structured comparison — it prevents bike-shedding by making trade-offs visible.
+- Use the Options table for structured comparison — visible trade-offs reduce circular debate.
 - Link to the Jira epic or ticket that triggered the decision for traceability.

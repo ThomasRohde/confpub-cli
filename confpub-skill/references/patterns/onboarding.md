@@ -1,8 +1,8 @@
 # Pattern: Onboarding Guide
 
-Progressive checklist for new team members. Task lists for trackable progress.
+Progressive checklist that takes a new team member from zero access to first contribution in two weeks. Task lists make every step trackable.
 
-**Labels:** `onboarding`, `team-guide`, plus team label
+**Labels:** `onboarding`, `team-guide`, `active`, plus team label
 
 ## Template
 
@@ -11,13 +11,15 @@ Progressive checklist for new team members. Task lists for trackable progress.
 labels:
   - onboarding
   - team-guide
+  - active
 ---
 
 # Onboarding: Squad Name
 
-::: panel Welcome!
-This guide gets you productive in two weeks.
-Work through it top to bottom — each section builds on the previous.
+::: panel Onboarding — Squad Name {status:Active|colour=Green}
+**Owner:** @tech-lead | **Audience:** New squad members | **Timeline:** 2 weeks
+
+Work through this guide top to bottom — each section builds on the previous.
 :::
 
 {toc}
@@ -68,7 +70,9 @@ Work through it top to bottom — each section builds on the previous.
 
 ## Tips
 
+- The context panel states owner, audience, status, and timeline so a reader knows instantly whether this guide applies to them.
 - Task lists make progress trackable — the new hire checks items off as they go.
 - Expand blocks for ADRs keep the page focused on actions, not reading.
 - Key Contacts table prevents the "who do I ask?" problem.
+- Include a lifecycle label (`active`) so stale guides surface in label-based searches.
 - Link to existing pages rather than duplicating content.

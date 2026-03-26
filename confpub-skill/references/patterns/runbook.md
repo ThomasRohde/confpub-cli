@@ -77,19 +77,31 @@ WHERE datname = 'payments' GROUP BY state;
    FROM pg_stat_activity
    WHERE state = 'active' AND now() - query_start > interval '30 minutes';
    ```
+   **Expected:** One `pg_terminate_backend: true` row per terminated connection.
 
 3. Restart PgBouncer:
    ```bash
    kubectl rollout restart deployment/pgbouncer -n payments
    ```
+   **Expected:** `deployment.apps/pgbouncer restarted`. Wait 30s, then confirm pods are Running.
+
+4. Verify recovery — see [Verification](#verification) checklist.
 
 ### Pod Crash Loop
 
 ::: expand Crash loop recovery steps
 1. Check logs: `kubectl logs -n payments <pod> --previous`
 2. Check events: `kubectl describe pod -n payments <pod>`
-3. If OOM: increase memory limit
-4. If app error: `kubectl rollout undo deployment/payment-service -n payments`
+3. If OOM: increase memory limit in the deployment spec and re-apply:
+   ```bash
+   kubectl set resources deployment/payment-service -n payments --limits=memory=1024Mi
+   ```
+   **Expected:** `deployment.apps/payment-service resource requirements updated`.
+4. If app error: roll back to the last working version:
+   ```bash
+   kubectl rollout undo deployment/payment-service -n payments
+   ```
+   **Expected:** `deployment.apps/payment-service rolled back`.
 :::
 
 ## Verification

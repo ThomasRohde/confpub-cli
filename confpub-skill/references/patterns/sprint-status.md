@@ -82,6 +82,6 @@ All blockers resolved
 
 ## Tips
 
-- The three-column Health at a Glance is the money section — a manager should read it in 3 seconds.
+- The three-column Health at a Glance carries the most weight — a manager should read it in 3 seconds.
 - Status lozenges in the backlog table replace the need for a separate Jira board view.
 - Update this page daily during standup or use confpub automation to refresh.

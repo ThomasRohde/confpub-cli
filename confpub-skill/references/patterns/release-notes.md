@@ -1,6 +1,6 @@
 # Pattern: Release Notes
 
-User-facing changelog. Professional, scannable, with migration steps.
+User-facing changelog with scannable structure, breaking-change callouts, and migration steps.
 
 **Labels:** `release-notes`, plus product/service label
 
@@ -16,10 +16,13 @@ labels:
 
 **Release date:** 2026-03-20
 
-::: panel Highlights
+::: panel Release Context
+**Owner:** Payments Team · **Status:** {status:Released|colour=Green} · **Rollout:** 100% GA
+
+**Highlights:**
 - Payment gateway integration with Stripe and Adyen
-- 40% improvement in checkout page load time
-- New reconciliation reporting for finance team
+- Checkout page load time reduced from 2.1s to 1.2s (P50)
+- Reconciliation reporting for finance team
 :::
 
 {toc:maxLevel=2}
@@ -54,10 +57,10 @@ Available under **Reports → Payment Reconciliation**.
 
 ## Migration Steps
 
-1. Update SDK: `pip install payments-sdk>=2.14.0`
-2. Replace v1 endpoints with v2
-3. Add `idempotency_key` header to payment requests
-4. Test in sandbox before production
+1. Update SDK: `pip install payments-sdk>=2.14.0` — verify with `pip show payments-sdk`
+2. Replace `POST /api/v1/payments` with `POST /api/v2/payments` in all callers
+3. Add `idempotency_key` header to every payment request — the v2 endpoint returns `400` without it
+4. Run the integration suite against sandbox: `pytest tests/payments/ --env=sandbox` — all tests green before production
 
 ::: expand Full changelog
 - `abc1234` feat: add Stripe provider
@@ -68,7 +71,7 @@ Available under **Reports → Payment Reconciliation**.
 
 ## Tips
 
-- Highlights panel at the top lets stakeholders skip the details.
-- Jira links in bug fixes provide traceability.
-- Breaking changes get a `> [!CAUTION]` admonition — never bury them.
-- Full changelog in an expand block keeps the page scannable.
+- Context panel at the top names the owner, rollout status, and key highlights so stakeholders can decide in seconds whether to read further.
+- Jira links in bug fixes let readers jump straight to the ticket for context.
+- Breaking changes get a `> [!CAUTION]` admonition — never bury them in a list.
+- Full changelog in an expand block keeps the page scannable for non-developers.
