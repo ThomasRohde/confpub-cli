@@ -84,7 +84,7 @@ class TestInstallSkill:
         assert (skill_dir / "SKILL.md").exists()
         assert (skill_dir / "README.md").exists()
         assert (skill_dir / "references" / "patterns" / "adr.md").exists()
-        assert result["total_files_written"] == 25  # 24 md + README
+        assert result["total_files_written"] == 26  # 24 md + README
 
     def test_install_defaults_to_claude_when_no_agents(self, repo):
         result = install_skill(repo)
@@ -103,7 +103,7 @@ class TestInstallSkill:
         (repo / "CLAUDE.md").write_text("# CLAUDE")
         result = install_skill(repo, dry_run=True)
         assert result["dry_run"] is True
-        assert result["total_files_written"] == 25
+        assert result["total_files_written"] == 26
         skill_dir = repo / ".claude" / "skills" / SKILL_NAME
         assert not skill_dir.exists()
 
@@ -118,7 +118,7 @@ class TestInstallSkill:
         (repo / "CLAUDE.md").write_text("# CLAUDE")
         install_skill(repo)
         result = install_skill(repo, force=True)
-        assert result["total_files_written"] == 25
+        assert result["total_files_written"] == 26
 
     def test_install_appends_copilot_pointer(self, repo):
         (repo / ".github").mkdir()
@@ -159,7 +159,7 @@ class TestInspectSkill:
         result = inspect_skill(repo)
         assert result["detected_agents"] == []
         assert result["skill_version"]
-        assert result["skill_files"] == 24
+        assert result["skill_files"] == 25
 
     def test_inspect_with_agents(self, repo):
         (repo / "CLAUDE.md").write_text("# CLAUDE")

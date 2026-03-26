@@ -128,6 +128,14 @@ When the user wants professional-looking pages, dashboards, or custom styling:
 | KPI cards, status boards, timelines via HTML | `references/design-styling.md` |
 | Container selection, nesting rules, page structure | `references/design-principles.md` |
 
+### Trust Scoring
+
+When the user asks about page or space trustworthiness, governance audits, or content quality assessment:
+
+| User Intent | Read |
+|-------------|------|
+| Trust scoring, page quality, space audits, governance metadata, scoring profiles, cache management | `references/trust-scoring.md` |
+
 ### Page Management & API
 
 When the user asks about managing existing pages or Confluence operations beyond publishing:

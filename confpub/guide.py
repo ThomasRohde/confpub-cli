@@ -67,15 +67,18 @@ def build_guide() -> dict[str, Any]:
                 "group": "read",
                 "mutates": False,
                 "description": "Search Confluence content using CQL",
-                "flags": ["--cql", "--space", "--title", "--type", "--limit", "--start", "--include-archived", "--excerpt-length"],
+                "flags": ["--cql", "--space", "--title", "--type", "--limit", "--start", "--include-archived", "--excerpt-length", "--no-score"],
                 "agent_hint": (
                     "Most agent workflows should include --type page to exclude attachments and space entities from results. "
                     "Use --start and --limit for pagination: first call with --start 0 --limit 25, "
-                    "then if has_more is true, call again with --start 25 --limit 25, and so on."
+                    "then if has_more is true, call again with --start 25 --limit 25, and so on. "
+                    "Search results include cached trust scores by default (trust.score, trust.band, trust.confidence, trust.primary_class). "
+                    "Pages without cached scores omit the trust field. Use --no-score to disable."
                 ),
                 "result_schema": {
                     "cql_query": "string — effective CQL sent to the API",
-                    "results": "list of {id, type, title, excerpt, url, space_key, entity_type, status, last_modified, container_title}",
+                    "results": "list of {id, type, title, excerpt, url, space_key, status, last_modified, container_title, trust?}",
+                    "results[].trust": "{score, band, confidence, primary_class, stale} — present when a cached trust score exists (omit with --no-score)",
                     "total": "int — total matching results",
                     "start": "int — current offset",
                     "limit": "int — page size",
@@ -118,7 +121,8 @@ def build_guide() -> dict[str, Any]:
                 "agent_hint": (
                     "Use --format markdown to get the page body as Markdown instead of Confluence storage format. "
                     "Use --raw for the full unprocessed Confluence REST API v2 page response "
-                    "(includes extensions, metadata, restrictions, version history — useful for debugging or advanced introspection)."
+                    "(includes extensions, metadata, restrictions, version history — useful for debugging or advanced introspection). "
+                    "Also warms the trust score cache for the inspected page."
                 ),
                 "result_schema": {
                     "page_id": "string",
@@ -151,7 +155,8 @@ def build_guide() -> dict[str, Any]:
                     "For personal spaces, quote the tilde: --space '~username' "
                     "(PowerShell expands unquoted ~). Or set CONFPUB_SPACE env var. "
                     "HTML macro name: auto-detected from Confluence type (Cloud=html-macro, DC=html). "
-                    "Override with --html-macro-name or html_macro_name in front-matter."
+                    "Override with --html-macro-name or html_macro_name in front-matter. "
+                    "After a successful publish (not dry-run), the trust score cache is warmed for the published page."
                 ),
             },
             "page.move": {
@@ -225,7 +230,7 @@ def build_guide() -> dict[str, Any]:
                 "mutates": True,
                 "description": "Add labels to a Confluence page",
                 "flags": ["--page-id", "--label"],
-                "agent_hint": "Use --label for each label (repeatable): --label api --label docs. Labels must not contain spaces and max 255 characters.",
+                "agent_hint": "Use --label for each label (repeatable): --label api --label docs. Labels must not contain spaces and max 255 characters. Also warms the trust score cache (labels affect classification).",
             },
             "label.remove": {
                 "group": "write",
@@ -273,7 +278,7 @@ def build_guide() -> dict[str, Any]:
                 "mutates": True,
                 "description": "Set a property on a Confluence page (create or update)",
                 "flags": ["--page-id", "--key", "--value"],
-                "agent_hint": "--value accepts a JSON string (parsed) or plain text (stored as string). Use JSON for structured data: --value '{\"status\":\"draft\"}'.",
+                "agent_hint": "--value accepts a JSON string (parsed) or plain text (stored as string). Use JSON for structured data: --value '{\"status\":\"draft\"}'. Also warms the trust score cache — especially useful after setting confpub.meta.v1.",
                 "result_schema": {"key": "string", "value": "any", "version": "int", "page_id": "string", "created": "bool"},
             },
             "property.delete": {
@@ -426,6 +431,124 @@ def build_guide() -> dict[str, Any]:
                     "skill_files": "int",
                 },
             },
+            "page.score": {
+                "group": "read",
+                "mutates": False,
+                "description": "Score a page's operational trustworthiness",
+                "flags": [
+                    "--page-id", "--space", "--title",
+                    "--profile", "--doc-class",
+                    "--explain", "--refresh",
+                    "--include-signals", "--include-missing",
+                    "--window",
+                ],
+                "agent_hint": (
+                    "Scores governance, freshness, evidence, structure, and corroboration. "
+                    "Returns score (0-100), band, confidence, subscores, and resolved classification "
+                    "(primary_class, subtype, lifecycle_state). "
+                    "Use --explain full --include-signals for detailed breakdown. "
+                    "Use --refresh to bypass cache. "
+                    "--doc-class accepts both new primary classes (governance, instruction, decision, ...) "
+                    "and legacy values (policy, runbook, adr — auto-mapped). "
+                    "Reads confpub.meta.v1 content property for governance metadata. "
+                    "See SCORE.md for the full scoring algorithm specification."
+                ),
+                "result_schema": {
+                    "algorithm_version": "string",
+                    "profile": "string",
+                    "primary_class": "string — resolved primary class (hub, governance, instruction, ...)",
+                    "subtype": "string | null — optional subtype (policy, runbook, adr, ...)",
+                    "lifecycle_state": "string | null — resolved lifecycle state (draft, active, approved, deprecated, ...)",
+                    "score": "int (0-100)",
+                    "band": "string (high|good|caution|low)",
+                    "confidence": "float (0-1)",
+                    "hard_caps": "list of {name, cap, reason} — active hard cap rules",
+                    "subscores": "{stewardship, freshness, evidence, structure, corroboration} — each float 0-1",
+                    "signals": "list of {id, status, weight, value, source} (when --include-signals)",
+                    "missing_signals": "list of string (when --include-missing)",
+                },
+                "examples": [
+                    "confpub page score --page-id 123456",
+                    'confpub page score --space EA --title "Target Architecture"',
+                    "confpub page score --page-id 123456 --explain full --include-signals",
+                    "confpub page score --page-id 123456 --profile working-area --refresh",
+                ],
+            },
+            "space.score": {
+                "group": "read",
+                "mutates": False,
+                "description": "Score a space's aggregate trustworthiness",
+                "flags": [
+                    "--space", "--profile", "--window",
+                    "--top", "--include-pages", "--include-low-pages",
+                    "--page-limit", "--refresh",
+                ],
+                "agent_hint": (
+                    "Aggregates page scores with coverage metrics. "
+                    "Returns weighted median score, ownership/review coverage, and burden metrics. "
+                    "Use --include-low-pages to surface pages needing attention. "
+                    "Use --top N to include the top N pages by score."
+                ),
+                "examples": [
+                    "confpub space score --space EA",
+                    "confpub space score --space EA --include-low-pages",
+                    "confpub space score --space EA --top 20 --profile official-knowledge",
+                ],
+            },
+            "trust.profile.inspect": {
+                "group": "read",
+                "mutates": False,
+                "description": "Show built-in or custom scoring profiles",
+                "flags": [],
+            },
+            "trust.profile.validate": {
+                "group": "read",
+                "mutates": False,
+                "description": "Validate a custom scoring profile file",
+                "flags": ["--file"],
+            },
+            "trust.cache.inspect": {
+                "group": "read",
+                "mutates": False,
+                "description": "Show trust cache stats, TTLs, and hit rate",
+                "flags": [],
+            },
+            "trust.cache.purge": {
+                "group": "write",
+                "mutates": True,
+                "description": "Clear trust cache entries",
+                "flags": ["--space"],
+                "examples": ["confpub trust cache purge --space EA"],
+            },
+            "trust.cache.warm": {
+                "group": "write",
+                "mutates": True,
+                "description": "Precompute trust scores for a space or CQL result set",
+                "flags": ["--space", "--cql"],
+                "examples": [
+                    "confpub trust cache warm --space EA",
+                    'confpub trust cache warm --cql \'label = "official-knowledge"\'',
+                ],
+            },
+            "trust.stamp.page": {
+                "group": "write",
+                "mutates": True,
+                "description": "Write confpub.trust.v1 content property to a page",
+                "flags": ["--page-id", "--space", "--title", "--profile", "--if-fresh", "--force", "--dry-run"],
+                "safety_flags": {
+                    "--force": "Overwrites existing confpub.trust.v1 without version check",
+                },
+                "agent_hint": (
+                    "Ordinary page score commands never mutate Confluence. "
+                    "Use trust stamp to explicitly write the computed score as a content property. "
+                    "The stamped property is disposable — delete and recompute at any time."
+                ),
+                "examples": [
+                    "confpub trust stamp page --page-id 123456",
+                    'confpub trust stamp page --space EA --title "Target Architecture" --if-fresh',
+                    "confpub trust stamp page --page-id 123456 --dry-run",
+                ],
+            },
         },
         "error_codes": {
             ERR_VALIDATION_REQUIRED: _error_code_entry(ERR_VALIDATION_REQUIRED),
@@ -504,6 +627,52 @@ def build_guide() -> dict[str, Any]:
                     "plan.apply uses <plan-dir>/confpub.lock (same directory as the plan artifact)"
                 ),
             ],
+        },
+        "trust_scoring": {
+            "description": (
+                "Trust scoring estimates how safe it is to rely on a page as current guidance. "
+                "Scores are cached locally in ~/.confpub/trust-cache.sqlite3 (override via CONFPUB_CACHE_DIR)."
+            ),
+            "auto_warming": {
+                "description": (
+                    "Trust scores are automatically computed and cached whenever confpub interacts with a page. "
+                    "This happens as a silent side effect — it never delays or disrupts the primary command."
+                ),
+                "commands_that_warm": [
+                    "page.inspect",
+                    "page.publish",
+                    "property.set",
+                    "label.add",
+                    "label.remove",
+                    "page.history",
+                ],
+                "behavior": [
+                    "If a fresh cache entry already exists for the page, scoring is skipped (zero cost)",
+                    "If no fresh entry exists, the page is scored and the result is cached",
+                    "Failures are silently ignored — the primary command always succeeds",
+                    "Cache TTL is 15 minutes; after that the next interaction re-scores",
+                ],
+            },
+            "search_enrichment": {
+                "description": (
+                    "Search results include cached trust scores by default. "
+                    "Each page-type result gets a 'trust' field with score, band, confidence, and primary_class. "
+                    "Pages without cached scores omit the trust field. Use --no-score to disable."
+                ),
+            },
+            "classification": {
+                "description": (
+                    "Pages are classified across five orthogonal dimensions: "
+                    "primary_class, subtype, domain, lifecycle_state, and generation_mode. "
+                    "Classification is resolved from confpub.meta.v1 properties, labels, and title patterns. "
+                    "Legacy doc_class values (policy, runbook, adr, etc.) are auto-mapped."
+                ),
+                "primary_classes": [
+                    "hub", "governance", "instruction", "reference", "specification",
+                    "decision", "analysis", "plan", "report", "record",
+                    "people_org", "scaffold", "unknown",
+                ],
+            },
         },
         "markdown_support": {
             "description": "Markdown features converted to native Confluence Storage Format.",

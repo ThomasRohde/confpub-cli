@@ -21,6 +21,19 @@ from confpub.errors import ConfpubError, exit_code_for, ERR_INTERNAL_SDK
 from confpub.output import emit_stderr, emit_stdout, is_compact, is_verbose, set_compact, set_quiet, set_verbose
 
 
+def _warm_trust_cache(client: Any, page_id: str) -> None:
+    """Opportunistically score a page to keep the trust cache warm.
+
+    Called as a side effect after commands that touch a page.
+    Never raises — failures are silently ignored.
+    """
+    try:
+        from confpub.trust.scoring import opportunistic_score
+        opportunistic_score(client, page_id)
+    except Exception:
+        pass
+
+
 def _resolve_space(cli_space: str | None, required: bool = False, fm_space: str | None = None) -> str | None:
     """Resolve space from CLI flag, front-matter, or CONFPUB_SPACE env var, with validation."""
     from confpub.config import ENV_SPACE
@@ -70,6 +83,11 @@ label_app = typer.Typer(help="Label operations", callback=_group_callback)
 comment_app = typer.Typer(help="Comment operations", callback=_group_callback)
 property_app = typer.Typer(help="Page property operations", callback=_group_callback)
 skill_app = typer.Typer(help="Skill management", callback=_group_callback)
+trust_app = typer.Typer(help="Trust scoring administration", callback=_group_callback)
+trust_cache_app = typer.Typer(help="Trust cache operations", callback=_group_callback)
+trust_profile_app = typer.Typer(help="Trust profile operations", callback=_group_callback)
+trust_app.add_typer(trust_cache_app, name="cache")
+trust_app.add_typer(trust_profile_app, name="profile")
 
 # ---------------------------------------------------------------------------
 # Main app
@@ -91,6 +109,7 @@ app.add_typer(label_app, name="label")
 app.add_typer(comment_app, name="comment")
 app.add_typer(property_app, name="property")
 app.add_typer(skill_app, name="skill")
+app.add_typer(trust_app, name="trust")
 
 
 def _version_callback(value: bool) -> None:
@@ -325,6 +344,7 @@ def page_inspect(
                 if conversion.unknown_macros:
                     result["unknown_macros"] = conversion.unknown_macros
             ctx.result = result
+            _warm_trust_cache(client, str(page["id"]))
 
 
 @page_app.command("publish")
@@ -420,6 +440,14 @@ def page_publish(
             html_macro_name=effective_html_macro,
         )
         ctx.result = result
+        if not dry_run:
+            # Extract page IDs from publish changes
+            for change in result.get("changes", []):
+                pid = change.get("confluence_page_id")
+                if pid:
+                    from confpub.confluence import build_client as _build
+                    _warm_trust_cache(_build(), str(pid))
+                    break  # single-page publish has one change
 
 
 @page_app.command("pull")
@@ -741,6 +769,7 @@ def label_add(
         ctx.client = client
         results = client.set_labels(page_id, label)
         ctx.result = {"labels_added": label, "results": results}
+        _warm_trust_cache(client, page_id)
 
 
 @label_app.command("remove")
@@ -758,6 +787,7 @@ def label_remove(
             result = client.remove_label(page_id, lbl)
             results.append(result)
         ctx.result = {"labels_removed": label, "results": results}
+        _warm_trust_cache(client, page_id)
 
 
 # ---------------------------------------------------------------------------
@@ -873,6 +903,7 @@ def property_set(
         client = build_client()
         ctx.client = client
         ctx.result = client.set_page_property(page_id, key, parsed_value)
+        _warm_trust_cache(client, page_id)
 
 
 @property_app.command("delete")
@@ -908,6 +939,7 @@ def page_history(
         ctx.client = client
         versions = client.get_page_history(page_id, limit=limit)
         ctx.result = {"versions": versions, "count": len(versions)}
+        _warm_trust_cache(client, page_id)
 
 
 @page_app.command("version")
@@ -1022,6 +1054,7 @@ def search(
     start: int = typer.Option(0, "--start", help="Starting offset for pagination"),
     include_archived: bool = typer.Option(False, "--include-archived", help="Include results from archived spaces"),
     excerpt_length: int = typer.Option(200, "--excerpt-length", help="Max excerpt chars (0 = unlimited)"),
+    no_score: bool = typer.Option(False, "--no-score", help="Omit cached trust scores from results"),
 ) -> None:
     """Search Confluence content using CQL."""
     with command_context("search", target={"cql": cql, "space": space, "title": title, "type": content_type}) as ctx:
@@ -1059,6 +1092,26 @@ def search(
             excerpt_length=excerpt_length,
         )
         result["cql_query"] = effective_cql
+
+        # Enrich results with cached trust scores (default on)
+        if not no_score:
+            try:
+                from confpub.trust.cache import TrustCache
+                cache = TrustCache()
+                page_ids = [
+                    r["id"] for r in result.get("results", [])
+                    if r.get("id") and r.get("type") == "page"
+                ]
+                if page_ids:
+                    scores = cache.get_scores_by_page_ids(page_ids)
+                    for r in result.get("results", []):
+                        pid = r.get("id")
+                        if pid and pid in scores:
+                            r["trust"] = scores[pid]
+                cache.close()
+            except Exception:
+                pass  # cache unavailable — skip silently
+
         if space and result.get("total", 0) == 0:
             try:
                 spaces = client.list_spaces()
@@ -1133,6 +1186,113 @@ def skill_inspect_cmd() -> None:
 
         root = Path.cwd()
         ctx.result = inspect_skill(root)
+
+
+# ---------------------------------------------------------------------------
+# Trust scoring commands
+# ---------------------------------------------------------------------------
+
+
+@page_app.command("score")
+def page_score(
+    page_id: Optional[str] = typer.Option(None, "--page-id", help="Confluence page ID"),
+    space: Optional[str] = typer.Option(None, "--space", help="Space key (or CONFPUB_SPACE)"),
+    title: Optional[str] = typer.Option(None, "--title", help="Page title (with --space)"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Scoring profile override"),
+    doc_class: Optional[str] = typer.Option(None, "--doc-class", help="Document class override"),
+    explain: str = typer.Option("none", "--explain", help="Explanation verbosity: none|summary|full"),
+    refresh: bool = typer.Option(False, "--refresh", help="Bypass cache, recompute from live data"),
+    include_signals: bool = typer.Option(False, "--include-signals", help="Include signal breakdown"),
+    include_missing: bool = typer.Option(False, "--include-missing", help="Include missing signal details"),
+    window: Optional[str] = typer.Option(None, "--window", help="Analytics time window (e.g. 90d)"),
+) -> None:
+    """Score a page for operational trustworthiness."""
+    space = _resolve_space(space)
+    target = {"page_id": page_id, "space": space, "title": title}
+    with command_context("page.score", target=target) as ctx:
+        if not page_id and not (space and title):
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "Either --page-id or both --space and --title are required",
+            )
+        # --explain full implies both include flags
+        if explain == "full":
+            include_signals = True
+            include_missing = True
+
+        from confpub.confluence import build_client
+        from confpub.trust.scoring import score_page as _score_page
+
+        client = build_client()
+        ctx.client = client
+        result = _score_page(
+            client,
+            page_id=page_id,
+            space=space,
+            title=title,
+            profile_name=profile,
+            doc_class_override=doc_class,
+            include_signals=include_signals,
+            include_missing=include_missing,
+            refresh=refresh,
+            window=window,
+        )
+        ctx.result = result.model_dump(mode="json", exclude_none=True)
+
+
+@trust_cache_app.command("inspect")
+def trust_cache_inspect() -> None:
+    """Show trust cache statistics."""
+    with command_context("trust.cache.inspect") as ctx:
+        from confpub.trust.cache import open_cache
+
+        cache = open_cache()
+        try:
+            ctx.result = cache.inspect()
+        finally:
+            cache.close()
+
+
+@trust_cache_app.command("purge")
+def trust_cache_purge(
+    space: Optional[str] = typer.Option(None, "--space", help="Purge entries for this space"),
+    page_id: Optional[str] = typer.Option(None, "--page-id", help="Purge entries for this page"),
+    older_than: Optional[int] = typer.Option(None, "--older-than", help="Purge entries older than N hours"),
+    all_entries: bool = typer.Option(False, "--all", help="Purge all entries"),
+) -> None:
+    """Clear trust cache entries."""
+    with command_context("trust.cache.purge") as ctx:
+        from confpub.trust.cache import open_cache
+
+        cache = open_cache()
+        try:
+            ctx.result = cache.purge(
+                space=space,
+                page_id=page_id,
+                older_than_hours=older_than,
+                purge_all=all_entries,
+            )
+        finally:
+            cache.close()
+
+
+@trust_profile_app.command("inspect")
+def trust_profile_inspect(
+    name: Optional[str] = typer.Option(None, "--name", help="Profile name (omit for all)"),
+) -> None:
+    """Show scoring profile details."""
+    with command_context("trust.profile.inspect") as ctx:
+        from confpub.trust.profiles import get_profile, list_profiles
+
+        if name:
+            p = get_profile(name)
+            ctx.result = p.model_dump(mode="json")
+        else:
+            profiles = list_profiles()
+            ctx.result = {
+                "profiles": {k: v.model_dump(mode="json") for k, v in profiles.items()},
+                "default": "official-knowledge",
+            }
 
 
 # ---------------------------------------------------------------------------

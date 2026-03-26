@@ -1,0 +1,1131 @@
+"""Trust scoring engine.
+
+Orchestrates signal collection, subscore computation, hard caps,
+weight renormalization, and final score calculation.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from datetime import datetime, timezone
+from typing import Any
+
+from confpub.errors import (
+    ERR_IO_TRUST_METADATA,
+    ERR_VALIDATION_NOT_FOUND,
+    ERR_VALIDATION_TRUST_DOC_CLASS,
+    ConfpubError,
+)
+from confpub.output import emit_stderr
+from confpub.trust.body_parser import analyze_body
+from confpub.trust.cache import TrustCache
+from confpub.trust.models import (
+    ALGORITHM_VERSION,
+    PRIMARY_CLASSES,
+    LIFECYCLE_STATES,
+    Capabilities,
+    ConfpubMeta,
+    PageScoreResult,
+    ProfileConfig,
+    RawPageData,
+    ResolvedClassification,
+    Signal,
+    band_for_score,
+)
+from confpub.trust.profiles import resolve_profile
+
+# ---------------------------------------------------------------------------
+# Classification inference
+# ---------------------------------------------------------------------------
+
+# Legacy doc_class values mapped to the new primary_class
+_LEGACY_CLASS_MAP: dict[str, str] = {
+    "policy": "governance",
+    "standard": "governance",
+    "runbook": "instruction",
+    "reference": "reference",
+    "adr": "decision",
+    "project": "plan",
+    "meeting-notes": "record",
+    "draft": "unknown",  # draft is now lifecycle_state, not a class
+    "unknown": "unknown",
+}
+
+_LABEL_TO_CLASS: dict[str, str] = {
+    # governance
+    "policy": "governance",
+    "standard": "governance",
+    "guideline": "governance",
+    "principle": "governance",
+    # instruction
+    "runbook": "instruction",
+    "playbook": "instruction",
+    "how-to": "instruction",
+    "procedure": "instruction",
+    "sop": "instruction",
+    "tutorial": "instruction",
+    "troubleshooting": "instruction",
+    # reference
+    "reference": "reference",
+    "faq": "reference",
+    "glossary": "reference",
+    "catalog": "reference",
+    # specification
+    "specification": "specification",
+    "requirements": "specification",
+    "architecture": "specification",
+    "design-spec": "specification",
+    # decision
+    "adr": "decision",
+    "decision": "decision",
+    "daci": "decision",
+    # analysis
+    "analysis": "analysis",
+    "rca": "analysis",
+    "risk-assessment": "analysis",
+    "review": "analysis",
+    # plan
+    "plan": "plan",
+    "roadmap": "plan",
+    "project-plan": "plan",
+    # report
+    "report": "report",
+    "status-report": "report",
+    "release-notes": "report",
+    # record
+    "meeting-notes": "record",
+    "meeting-note": "record",
+    "minutes": "record",
+    "record": "record",
+    # hub
+    "hub": "hub",
+    "index": "hub",
+    "homepage": "hub",
+    # people_org
+    "handbook": "people_org",
+    "org-chart": "people_org",
+    "team-profile": "people_org",
+    # scaffold
+    "template": "scaffold",
+    "scaffold": "scaffold",
+    # primary class names accepted directly as labels
+    "hub": "hub",
+    "governance": "governance",
+    "instruction": "instruction",
+    "specification": "specification",
+    "decision": "decision",
+    "analysis": "analysis",
+    "plan": "plan",
+    "report": "report",
+    "record": "record",
+    "people_org": "people_org",
+    "people-org": "people_org",
+}
+
+_LABEL_TO_LIFECYCLE: dict[str, str] = {
+    "draft": "draft",
+    "approved": "approved",
+    "deprecated": "deprecated",
+    "archived": "archived",
+    "proposed": "proposed",
+    "accepted": "accepted",
+}
+
+_TITLE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(?i)^ADR[\s\-]?\d+"), "decision"),
+    (re.compile(r"(?i)\bmeeting[\s\-]?notes?\b"), "record"),
+    (re.compile(r"(?i)\bminutes\b"), "record"),
+    (re.compile(r"(?i)\brunbook\b"), "instruction"),
+    (re.compile(r"(?i)\bplaybook\b"), "instruction"),
+    (re.compile(r"(?i)\bhow[\s\-]?to\b"), "instruction"),
+    (re.compile(r"(?i)\bstatus[\s\-]?report\b"), "report"),
+    (re.compile(r"(?i)\brelease[\s\-]?notes?\b"), "report"),
+    (re.compile(r"(?i)\bpolicy\b"), "governance"),
+    (re.compile(r"(?i)\broadmap\b"), "plan"),
+    (re.compile(r"(?i)\barchitecture\b"), "specification"),
+    (re.compile(r"(?i)\bdesign[\s\-]?spec\b"), "specification"),
+    (re.compile(r"(?i)\bhandbook\b"), "people_org"),
+    (re.compile(r"(?i)\borg[\s\-]?chart\b"), "people_org"),
+    (re.compile(r"(?i)\bglossary\b"), "reference"),
+    (re.compile(r"(?i)\bFAQ\b"), "reference"),
+    (re.compile(r"(?i)\btemplate\b"), "scaffold"),
+    (re.compile(r"(?i)\breview\b"), "analysis"),
+    (re.compile(r"(?i)\bassessment\b"), "analysis"),
+    (re.compile(r"(?i)\broot[\s\-]?cause\b"), "analysis"),
+]
+
+
+def _resolve_classification(
+    class_override: str | None,
+    meta: ConfpubMeta | None,
+    labels: list[dict[str, Any]],
+    title: str,
+    page_status: str,
+) -> ResolvedClassification:
+    """Resolve the full page classification from all sources.
+
+    For primary_class, precedence: CLI > meta.primary_class > meta.doc_class (legacy) > labels > title > unknown.
+    For lifecycle_state: meta.lifecycle_state > labels > page status > None.
+    """
+    result = ResolvedClassification()
+
+    # --- primary_class ---
+    if class_override:
+        if class_override not in PRIMARY_CLASSES:
+            # Check if it's a legacy doc_class value
+            if class_override in _LEGACY_CLASS_MAP:
+                result.primary_class = _LEGACY_CLASS_MAP[class_override]
+            else:
+                raise ConfpubError(
+                    ERR_VALIDATION_TRUST_DOC_CLASS,
+                    f"Unknown primary class '{class_override}'. "
+                    f"Valid classes: {', '.join(PRIMARY_CLASSES)}",
+                    details={"requested": class_override, "valid": PRIMARY_CLASSES},
+                )
+        else:
+            result.primary_class = class_override
+    elif meta and meta.primary_class and meta.primary_class in PRIMARY_CLASSES:
+        result.primary_class = meta.primary_class
+    elif meta and meta.doc_class:
+        # Legacy fallback
+        result.primary_class = _LEGACY_CLASS_MAP.get(meta.doc_class, "unknown")
+    else:
+        # Infer from labels
+        for lbl in labels:
+            name = lbl.get("name", "").lower()
+            if name in _LABEL_TO_CLASS:
+                result.primary_class = _LABEL_TO_CLASS[name]
+                break
+
+        # Infer from title
+        if result.primary_class == "unknown":
+            for pattern, cls in _TITLE_PATTERNS:
+                if pattern.search(title):
+                    result.primary_class = cls
+                    break
+
+    # --- subtype (from meta only) ---
+    if meta and meta.subtype:
+        result.subtype = meta.subtype
+
+    # --- domain (from meta only) ---
+    if meta and meta.domain:
+        result.domain = meta.domain
+
+    # --- lifecycle_state ---
+    if meta and meta.lifecycle_state and meta.lifecycle_state in LIFECYCLE_STATES:
+        result.lifecycle_state = meta.lifecycle_state
+    else:
+        # Infer from labels
+        for lbl in labels:
+            name = lbl.get("name", "").lower()
+            if name in _LABEL_TO_LIFECYCLE:
+                result.lifecycle_state = _LABEL_TO_LIFECYCLE[name]
+                break
+        # Infer from page status
+        if result.lifecycle_state is None and page_status in ("archived", "trashed"):
+            result.lifecycle_state = "archived"
+
+    # --- generation_mode ---
+    if meta and meta.generation_mode:
+        result.generation_mode = meta.generation_mode
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Signal collection from Confluence
+# ---------------------------------------------------------------------------
+
+
+def _collect_raw_data(
+    client: Any,
+    *,
+    page_id: str | None = None,
+    space: str | None = None,
+    title: str | None = None,
+) -> RawPageData:
+    """Fetch all raw data needed for scoring from Confluence."""
+    # Resolve the page
+    page: dict[str, Any] = {}
+    try:
+        if page_id:
+            page = client.get_page_by_id(page_id)
+        elif space and title:
+            page = client.get_page(space, title)
+    except ConfpubError:
+        raise
+    except Exception as exc:
+        raise ConfpubError(
+            ERR_IO_TRUST_METADATA,
+            f"Failed to fetch page metadata: {exc}",
+        ) from exc
+
+    if not page or not page.get("id"):
+        raise ConfpubError(
+            ERR_IO_TRUST_METADATA,
+            "Core page metadata unavailable — cannot score.",
+            details={"page_id": page_id, "space": space, "title": title},
+        )
+
+    pid = str(page["id"])
+    version = page.get("version", {})
+    version_number = version.get("number", 1) if isinstance(version, dict) else 1
+    version_when = version.get("when", "") if isinstance(version, dict) else ""
+    version_by = ""
+    if isinstance(version, dict):
+        by = version.get("by", {})
+        version_by = (
+            by.get("displayName", by.get("username", ""))
+            if isinstance(by, dict)
+            else str(by)
+        )
+
+    page_space = page.get("space", {})
+    space_key = (
+        page_space.get("key", space or "")
+        if isinstance(page_space, dict)
+        else (space or "")
+    )
+
+    body = page.get("body", {})
+    body_storage = ""
+    if isinstance(body, dict):
+        storage = body.get("storage", {})
+        body_storage = storage.get("value", "") if isinstance(storage, dict) else ""
+
+    status = page.get("status", "current")
+    page_title = page.get("title", title or "")
+
+    ancestors = page.get("ancestors", [])
+    parent_id = str(ancestors[-1]["id"]) if ancestors else None
+
+    # Labels
+    labels: list[dict[str, Any]] = []
+    try:
+        labels = client.get_labels(pid)
+    except Exception:
+        pass
+
+    # confpub.meta.v1 content property
+    meta_property: ConfpubMeta | None = None
+    try:
+        prop = client.get_page_property(pid, "confpub.meta.v1")
+        if prop and "value" in prop:
+            val = prop["value"]
+            if isinstance(val, dict):
+                meta_property = ConfpubMeta(**val)
+    except ConfpubError as e:
+        if e.code not in (ERR_VALIDATION_NOT_FOUND, "ERR_AUTH_FORBIDDEN"):
+            raise
+    except Exception:
+        pass
+
+    # Version history (limit 5 to avoid N+1 explosion)
+    history: list[dict[str, Any]] = []
+    try:
+        history = client.get_page_history(pid, limit=5)
+    except Exception:
+        pass
+
+    # Infer created timestamp from earliest history entry
+    created = None
+    if history:
+        created = history[-1].get("when", version_when)
+
+    return RawPageData(
+        page_id=pid,
+        space_key=space_key,
+        title=page_title,
+        status=status,
+        body_storage=body_storage,
+        version_number=version_number,
+        version_when=version_when,
+        version_by=version_by,
+        created=created,
+        labels=labels,
+        meta_property=meta_property,
+        history=history,
+        parent_id=parent_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Subscore: Stewardship (0.30)
+# ---------------------------------------------------------------------------
+
+_STEWARDSHIP_SIGNALS = {
+    "owner.present": 0.22,
+    "review.metadata": 0.22,
+    "approvers.present": 0.12,
+    "content_state.final": 0.10,  # missing in Phase 1
+    "version.maturity": 0.12,
+    "edit.quality": 0.10,
+    "source_of_record.present": 0.12,
+}
+
+
+def _compute_stewardship(
+    raw: RawPageData,
+    meta: ConfpubMeta | None,
+) -> tuple[float, list[Signal]]:
+    signals: list[Signal] = []
+
+    # Owner present
+    owner_id = meta.owner_account_id if meta else None
+    inferred = False
+    if not owner_id and raw.history:
+        # Infer from earliest version author
+        earliest = raw.history[-1] if raw.history else None
+        if earliest:
+            owner_id = earliest.get("by", "")
+            inferred = bool(owner_id)
+
+    signals.append(Signal(
+        id="owner.present",
+        status="positive" if owner_id else "negative",
+        weight=_STEWARDSHIP_SIGNALS["owner.present"],
+        value=bool(owner_id),
+        source="confpub.meta.v1.owner_account_id" if not inferred else "history.earliest.by",
+        inferred=inferred,
+    ))
+
+    # Review metadata
+    has_reviewed_at = bool(meta and meta.reviewed_at)
+    has_interval = bool(meta and meta.review_interval_days)
+    review_score = 1.0 if (has_reviewed_at and has_interval) else (0.5 if (has_reviewed_at or has_interval) else 0.0)
+    signals.append(Signal(
+        id="review.metadata",
+        status="positive" if review_score == 1.0 else ("neutral" if review_score > 0 else "negative"),
+        weight=_STEWARDSHIP_SIGNALS["review.metadata"],
+        value={"reviewed_at": has_reviewed_at, "interval": has_interval},
+        source="confpub.meta.v1",
+    ))
+
+    # Approvers
+    has_approvers = bool(meta and meta.approvers)
+    signals.append(Signal(
+        id="approvers.present",
+        status="positive" if has_approvers else "negative",
+        weight=_STEWARDSHIP_SIGNALS["approvers.present"],
+        value=len(meta.approvers) if meta else 0,
+        source="confpub.meta.v1.approvers",
+    ))
+
+    # Content state — always missing in Phase 1
+    signals.append(Signal(
+        id="content_state.final",
+        status="missing",
+        weight=_STEWARDSHIP_SIGNALS["content_state.final"],
+        value=None,
+        source="content_state_api",
+    ))
+
+    # Version maturity
+    vn = raw.version_number
+    maturity_score = 1.0 if vn >= 3 else (0.5 if vn == 2 else 0.25)
+    signals.append(Signal(
+        id="version.maturity",
+        status="positive" if vn >= 3 else "neutral",
+        weight=_STEWARDSHIP_SIGNALS["version.maturity"],
+        value=vn,
+        source="page.version.number",
+    ))
+
+    # Non-trivial edit history
+    substantive = sum(1 for h in raw.history if h.get("message", ""))
+    edit_score = 1.0 if substantive >= 2 else (0.5 if substantive == 1 else 0.0)
+    signals.append(Signal(
+        id="edit.quality",
+        status="positive" if substantive >= 2 else ("neutral" if substantive == 1 else "negative"),
+        weight=_STEWARDSHIP_SIGNALS["edit.quality"],
+        value=substantive,
+        source="page.history.messages",
+    ))
+
+    # Source of record
+    has_sor = bool(meta and meta.source_of_record)
+    signals.append(Signal(
+        id="source_of_record.present",
+        status="positive" if has_sor else "negative",
+        weight=_STEWARDSHIP_SIGNALS["source_of_record.present"],
+        value=has_sor,
+        source="confpub.meta.v1.source_of_record",
+    ))
+
+    # Compute subscore, redistributing missing content_state weight
+    available = [s for s in signals if s.status != "missing"]
+    total_available_weight = sum(s.weight for s in available)
+
+    score = 0.0
+    for s in available:
+        effective_weight = s.weight / total_available_weight if total_available_weight > 0 else 0.0
+        if s.id == "review.metadata":
+            score += effective_weight * review_score
+        elif s.id == "version.maturity":
+            score += effective_weight * maturity_score
+        elif s.id == "edit.quality":
+            score += effective_weight * edit_score
+        elif s.status == "positive":
+            score += effective_weight * 1.0
+
+    return score, signals
+
+
+# ---------------------------------------------------------------------------
+# Subscore: Freshness (0.25)
+# ---------------------------------------------------------------------------
+
+
+def _compute_freshness(
+    raw: RawPageData,
+    meta: ConfpubMeta | None,
+    profile: ProfileConfig,
+    primary_class: str,
+) -> tuple[float, list[Signal]]:
+    # Reference date: reviewed_at > version_when > created
+    ref_date: datetime | None = None
+    ref_source = ""
+
+    if meta and meta.reviewed_at:
+        try:
+            ref_date = datetime.fromisoformat(meta.reviewed_at)
+            if ref_date.tzinfo is None:
+                ref_date = ref_date.replace(tzinfo=timezone.utc)
+            ref_source = "confpub.meta.v1.reviewed_at"
+        except (ValueError, TypeError):
+            pass
+
+    if ref_date is None and raw.version_when:
+        try:
+            ref_date = datetime.fromisoformat(raw.version_when)
+            if ref_date.tzinfo is None:
+                ref_date = ref_date.replace(tzinfo=timezone.utc)
+            ref_source = "page.version.when"
+        except (ValueError, TypeError):
+            pass
+
+    if ref_date is None and raw.created:
+        try:
+            ref_date = datetime.fromisoformat(raw.created)
+            if ref_date.tzinfo is None:
+                ref_date = ref_date.replace(tzinfo=timezone.utc)
+            ref_source = "page.created"
+        except (ValueError, TypeError):
+            pass
+
+    if ref_date is None:
+        # No date at all — worst case
+        return 0.0, [Signal(
+            id="freshness.decay",
+            status="negative",
+            weight=1.0,
+            value=None,
+            source="none",
+        )]
+
+    now = datetime.now(timezone.utc)
+    age_days = max(0.0, (now - ref_date).total_seconds() / 86400)
+    half_life = profile.half_lives.get(primary_class, 120)
+
+    freshness = math.exp(-math.log(2) * age_days / half_life)
+
+    # Decision class: cap freshness (decisions age gracefully)
+    if primary_class == "decision":
+        freshness = min(freshness, 0.80)
+
+    signal = Signal(
+        id="freshness.decay",
+        status="positive" if freshness >= 0.5 else ("neutral" if freshness >= 0.25 else "negative"),
+        weight=1.0,
+        value={"age_days": round(age_days, 1), "half_life": half_life, "freshness": round(freshness, 4)},
+        source=ref_source,
+    )
+
+    return freshness, [signal]
+
+
+# ---------------------------------------------------------------------------
+# Subscore: Evidence (0.20)
+# ---------------------------------------------------------------------------
+
+_EVIDENCE_SIGNALS = {
+    "authoritative_source": 0.30,
+    "multiple_source_types": 0.20,
+    "repo_or_sor": 0.20,
+    "jira_refs": 0.10,
+    "no_dead_links": 0.10,  # missing in Phase 1
+    "reference_density": 0.10,
+}
+
+
+def _compute_evidence(
+    raw: RawPageData,
+    meta: ConfpubMeta | None,
+    body_link_count: int,
+) -> tuple[float, list[Signal]]:
+    signals: list[Signal] = []
+    sources = meta.authoritative_sources if meta else []
+    source_types = {s.get("type", "") for s in sources} if sources else set()
+
+    # At least one authoritative source
+    has_source = len(sources) >= 1
+    signals.append(Signal(
+        id="authoritative_source",
+        status="positive" if has_source else "negative",
+        weight=_EVIDENCE_SIGNALS["authoritative_source"],
+        value=len(sources),
+        source="confpub.meta.v1.authoritative_sources",
+    ))
+
+    # Multiple source types
+    multi = len(source_types) >= 2
+    signals.append(Signal(
+        id="multiple_source_types",
+        status="positive" if multi else "negative",
+        weight=_EVIDENCE_SIGNALS["multiple_source_types"],
+        value=sorted(source_types) if source_types else [],
+        source="confpub.meta.v1.authoritative_sources",
+    ))
+
+    # Repo or source-of-record
+    has_sor = bool(meta and meta.source_of_record)
+    has_repo = "repo" in source_types
+    signals.append(Signal(
+        id="repo_or_sor",
+        status="positive" if (has_sor or has_repo) else "negative",
+        weight=_EVIDENCE_SIGNALS["repo_or_sor"],
+        value={"source_of_record": has_sor, "repo_source": has_repo},
+        source="confpub.meta.v1",
+    ))
+
+    # Jira/change refs
+    has_jira = "jira" in source_types
+    signals.append(Signal(
+        id="jira_refs",
+        status="positive" if has_jira else "negative",
+        weight=_EVIDENCE_SIGNALS["jira_refs"],
+        value=has_jira,
+        source="confpub.meta.v1.authoritative_sources",
+    ))
+
+    # No dead links — missing in Phase 1
+    signals.append(Signal(
+        id="no_dead_links",
+        status="missing",
+        weight=_EVIDENCE_SIGNALS["no_dead_links"],
+        value=None,
+        source="link_check",
+    ))
+
+    # Reference density
+    density_score = 1.0 if body_link_count >= 3 else (0.5 if body_link_count >= 1 else 0.0)
+    signals.append(Signal(
+        id="reference_density",
+        status="positive" if body_link_count >= 3 else ("neutral" if body_link_count >= 1 else "negative"),
+        weight=_EVIDENCE_SIGNALS["reference_density"],
+        value=body_link_count,
+        source="body.outbound_links",
+    ))
+
+    # Compute subscore, redistributing missing signal weight
+    available = [s for s in signals if s.status != "missing"]
+    total_w = sum(s.weight for s in available)
+    score = 0.0
+    if total_w > 0:
+        for s in available:
+            ew = s.weight / total_w
+            if s.id == "reference_density":
+                score += ew * density_score
+            elif s.status == "positive":
+                score += ew * 1.0
+
+    return score, signals
+
+
+# ---------------------------------------------------------------------------
+# Subscore: Structure (0.15)
+# ---------------------------------------------------------------------------
+
+_STRUCTURE_SIGNALS = {
+    "has_excerpt": 0.15,
+    "has_headings": 0.15,
+    "has_labels": 0.10,
+    "sane_length": 0.15,
+    "no_placeholder": 0.20,
+    "no_empty_sections": 0.10,
+    "assets_resolve": 0.15,  # missing in Phase 1
+}
+
+
+def _compute_structure(
+    raw: RawPageData,
+    profile: ProfileConfig,
+) -> tuple[float, list[Signal]]:
+    features = analyze_body(raw.body_storage, profile.anti_signal_patterns)
+    signals: list[Signal] = []
+
+    # Excerpt
+    signals.append(Signal(
+        id="has_excerpt",
+        status="positive" if features.has_excerpt else "negative",
+        weight=_STRUCTURE_SIGNALS["has_excerpt"],
+        value=features.has_excerpt,
+        source="body.excerpt",
+    ))
+
+    # Headings
+    signals.append(Signal(
+        id="has_headings",
+        status="positive" if features.heading_count > 0 else "negative",
+        weight=_STRUCTURE_SIGNALS["has_headings"],
+        value=features.heading_count,
+        source="body.headings",
+    ))
+
+    # Labels
+    has_labels = len(raw.labels) > 0
+    signals.append(Signal(
+        id="has_labels",
+        status="positive" if has_labels else "negative",
+        weight=_STRUCTURE_SIGNALS["has_labels"],
+        value=len(raw.labels),
+        source="page.labels",
+    ))
+
+    # Sane length
+    tl = features.text_length
+    if tl < 200:
+        length_score = 0.0
+        length_status = "negative"
+    elif tl > 50000:
+        length_score = 0.5
+        length_status = "neutral"
+    else:
+        length_score = 1.0
+        length_status = "positive"
+    signals.append(Signal(
+        id="sane_length",
+        status=length_status,
+        weight=_STRUCTURE_SIGNALS["sane_length"],
+        value=tl,
+        source="body.text_length",
+    ))
+
+    # No placeholder text
+    has_placeholders = len(features.placeholder_texts) > 0
+    signals.append(Signal(
+        id="no_placeholder",
+        status="negative" if has_placeholders else "positive",
+        weight=_STRUCTURE_SIGNALS["no_placeholder"],
+        value=features.placeholder_texts if has_placeholders else [],
+        source="body.placeholder_scan",
+    ))
+
+    # No empty sections
+    signals.append(Signal(
+        id="no_empty_sections",
+        status="negative" if features.empty_section_count > 0 else "positive",
+        weight=_STRUCTURE_SIGNALS["no_empty_sections"],
+        value=features.empty_section_count,
+        source="body.empty_sections",
+    ))
+
+    # Assets resolve — missing in Phase 1
+    signals.append(Signal(
+        id="assets_resolve",
+        status="missing",
+        weight=_STRUCTURE_SIGNALS["assets_resolve"],
+        value=None,
+        source="asset_check",
+    ))
+
+    # Compute subscore
+    available = [s for s in signals if s.status != "missing"]
+    total_w = sum(s.weight for s in available)
+    score = 0.0
+    if total_w > 0:
+        for s in available:
+            ew = s.weight / total_w
+            if s.id == "sane_length":
+                score += ew * length_score
+            elif s.status == "positive":
+                score += ew * 1.0
+
+    return score, signals
+
+
+# ---------------------------------------------------------------------------
+# Subscore: Corroboration (0.10)
+# ---------------------------------------------------------------------------
+
+
+def _compute_corroboration() -> tuple[float, list[Signal]]:
+    """Corroboration is entirely missing in Phase 1 (no analytics/watchers)."""
+    return 0.0, [
+        Signal(id="viewers", status="missing", weight=0.50, source="analytics"),
+        Signal(id="inbound_links", status="missing", weight=0.30, source="search"),
+        Signal(id="watchers", status="missing", weight=0.20, source="watchers_api"),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Hard caps
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_hard_caps(
+    raw: RawPageData,
+    meta: ConfpubMeta | None,
+    profile: ProfileConfig,
+    classification: ResolvedClassification,
+    body_anti_signals: list[str],
+) -> list[dict[str, Any]]:
+    """Evaluate all hard caps and return those that triggered."""
+    triggered: list[dict[str, Any]] = []
+    caps_by_name = {c.name: c for c in profile.hard_caps if c.enabled}
+
+    # Archived / trashed
+    if "archived" in caps_by_name and raw.status in ("archived", "trashed"):
+        triggered.append({
+            "name": "archived",
+            "cap": caps_by_name["archived"].cap,
+            "reason": f"Page status is '{raw.status}'",
+        })
+
+    # Superseded by
+    if "superseded_by" in caps_by_name and meta and meta.superseded_by:
+        triggered.append({
+            "name": "superseded_by",
+            "cap": caps_by_name["superseded_by"].cap,
+            "reason": f"Superseded by '{meta.superseded_by}'",
+        })
+
+    # Anti-signal body
+    if "anti_signal_body" in caps_by_name and body_anti_signals:
+        triggered.append({
+            "name": "anti_signal_body",
+            "cap": caps_by_name["anti_signal_body"].cap,
+            "reason": f"Body contains: {', '.join(body_anti_signals[:3])}",
+        })
+
+    # Overdue review
+    if "overdue_review" in caps_by_name and meta and meta.reviewed_at and meta.review_interval_days:
+        try:
+            reviewed = datetime.fromisoformat(meta.reviewed_at)
+            if reviewed.tzinfo is None:
+                reviewed = reviewed.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            overdue_days = (now - reviewed).days - meta.review_interval_days
+            if overdue_days > meta.review_interval_days:
+                triggered.append({
+                    "name": "overdue_review",
+                    "cap": caps_by_name["overdue_review"].cap,
+                    "reason": f"Review overdue by {overdue_days} days (interval: {meta.review_interval_days}d)",
+                })
+        except (ValueError, TypeError):
+            pass
+
+    # Title pattern
+    if "title_pattern" in caps_by_name:
+        if re.match(profile.title_cap_pattern, raw.title):
+            triggered.append({
+                "name": "title_pattern",
+                "cap": caps_by_name["title_pattern"].cap,
+                "reason": f"Title '{raw.title}' matches exclusion pattern",
+            })
+
+    # Lifecycle: draft
+    if "lifecycle_draft" in caps_by_name and classification.lifecycle_state == "draft":
+        triggered.append({
+            "name": "lifecycle_draft",
+            "cap": caps_by_name["lifecycle_draft"].cap,
+            "reason": "Lifecycle state is 'draft'",
+        })
+
+    # Lifecycle: deprecated
+    if "lifecycle_deprecated" in caps_by_name and classification.lifecycle_state == "deprecated":
+        triggered.append({
+            "name": "lifecycle_deprecated",
+            "cap": caps_by_name["lifecycle_deprecated"].cap,
+            "reason": "Lifecycle state is 'deprecated'",
+        })
+
+    # Scaffold class
+    if "scaffold_class" in caps_by_name and classification.primary_class == "scaffold":
+        triggered.append({
+            "name": "scaffold_class",
+            "cap": caps_by_name["scaffold_class"].cap,
+            "reason": "Page is classified as scaffold (template/checklist/starter doc)",
+        })
+
+    # No owner and age > 90 days
+    if "no_owner_90d" in caps_by_name:
+        has_owner = bool(meta and meta.owner_account_id)
+        if not has_owner:
+            ref = raw.created or raw.version_when
+            if ref:
+                try:
+                    created_dt = datetime.fromisoformat(ref)
+                    if created_dt.tzinfo is None:
+                        created_dt = created_dt.replace(tzinfo=timezone.utc)
+                    age_days = (datetime.now(timezone.utc) - created_dt).days
+                    if age_days > 90:
+                        triggered.append({
+                            "name": "no_owner_90d",
+                            "cap": caps_by_name["no_owner_90d"].cap,
+                            "reason": f"No owner and page is {age_days} days old",
+                        })
+                except (ValueError, TypeError):
+                    pass
+
+    return triggered
+
+
+# ---------------------------------------------------------------------------
+# Weight renormalization
+# ---------------------------------------------------------------------------
+
+
+def _renormalize_weights(
+    weights: dict[str, float],
+    missing_subscores: set[str],
+) -> dict[str, float]:
+    """Redistribute weight from missing subscores proportionally."""
+    available = {k: v for k, v in weights.items() if k not in missing_subscores}
+    total = sum(available.values())
+    if total <= 0:
+        return {k: 0.0 for k in weights}
+    return {k: (v / total if k in available else 0.0) for k, v in weights.items()}
+
+
+# ---------------------------------------------------------------------------
+# Confidence
+# ---------------------------------------------------------------------------
+
+
+def _compute_confidence(
+    all_signals: list[Signal],
+    weights: dict[str, float],
+    missing_subscores: set[str],
+) -> float:
+    """Compute confidence based on signal completeness."""
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        return 0.0
+
+    missing_subscore_weight = sum(weights.get(s, 0.0) for s in missing_subscores)
+    total_signal_weight = sum(s.weight for s in all_signals)
+    missing_signal_weight = sum(s.weight for s in all_signals if s.status == "missing")
+    partial_penalty = 0.0
+    if total_signal_weight > 0:
+        partial_penalty = (missing_signal_weight / total_signal_weight) * (total_weight - missing_subscore_weight) * 0.5
+
+    confidence = 1.0 - (missing_subscore_weight + partial_penalty) / total_weight
+    return round(max(0.0, min(1.0, confidence)), 2)
+
+
+# ---------------------------------------------------------------------------
+# Missing signals list
+# ---------------------------------------------------------------------------
+
+_ALWAYS_MISSING_SIGNALS: list[str] = [
+    "content_state",
+    "analytics.views",
+    "analytics.unique_viewers",
+    "watchers.count",
+]
+
+
+# ---------------------------------------------------------------------------
+# Opportunistic scoring (cache warming)
+# ---------------------------------------------------------------------------
+
+
+def opportunistic_score(client: Any, page_id: str) -> None:
+    """Score a page if not already cached. Never raises.
+
+    Call this after any command that touches a page to keep the
+    trust cache warm. Skips silently if the cache already has a
+    fresh entry or if anything goes wrong.
+    """
+    try:
+        cache = TrustCache()
+        # Quick check: is there any fresh entry for this page?
+        cur = cache._conn.execute(
+            "SELECT expires_at FROM page_score_cache WHERE page_id = ? ORDER BY created_at DESC LIMIT 1",
+            (page_id,),
+        )
+        row = cur.fetchone()
+        if row:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).isoformat()
+            if now <= row[0]:
+                cache.close()
+                return  # fresh cache entry exists, skip
+
+        cache.close()
+        # Score the page (this handles its own caching)
+        score_page(client, page_id=page_id, refresh=True)
+    except Exception:
+        pass  # never disrupt the primary command
+
+
+# ---------------------------------------------------------------------------
+# Main scoring function
+# ---------------------------------------------------------------------------
+
+
+def score_page(
+    client: Any,
+    *,
+    page_id: str | None = None,
+    space: str | None = None,
+    title: str | None = None,
+    profile_name: str | None = None,
+    doc_class_override: str | None = None,
+    include_signals: bool = False,
+    include_missing: bool = False,
+    refresh: bool = False,
+    window: str | None = None,
+) -> PageScoreResult:
+    """Score a single page for operational trustworthiness."""
+    # 1. Collect raw data
+    raw = _collect_raw_data(client, page_id=page_id, space=space, title=title)
+
+    # 2. Resolve classification and profile
+    classification = _resolve_classification(
+        doc_class_override, raw.meta_property, raw.labels, raw.title, raw.status,
+    )
+    primary_class = classification.primary_class
+    profile = resolve_profile(profile_name, raw.meta_property)
+
+    # 3. Check cache (unless refresh)
+    cache: TrustCache | None = None
+    cache_key = ""
+    site_url = ""
+    try:
+        from confpub.config import load_config
+        cfg = load_config()
+        site_url = cfg.base_url or ""
+    except Exception:
+        pass
+
+    if not refresh:
+        try:
+            cache = TrustCache()
+            cache_key = TrustCache.make_cache_key(
+                site_url, raw.page_id, raw.version_number, profile.name, primary_class,
+            )
+            cached_result, is_stale = cache.get_page_score(cache_key)
+            if cached_result is not None and not is_stale:
+                cached_result.cache = {"hit": True, "stale": False, "age_seconds": 0}
+                if not include_signals:
+                    cached_result.signals = None
+                if not include_missing:
+                    cached_result.missing_signals = None
+                    cached_result.capabilities = None
+                    cached_result.weight_renormalization = None
+                return cached_result
+        except Exception as exc:
+            emit_stderr(f"Trust cache read failed (non-fatal): {exc}")
+            cache = None
+
+    # 4. Analyze body
+    body_features = analyze_body(raw.body_storage, profile.anti_signal_patterns)
+
+    # 5. Compute subscores
+    stew_score, stew_signals = _compute_stewardship(raw, raw.meta_property)
+    fresh_score, fresh_signals = _compute_freshness(raw, raw.meta_property, profile, primary_class)
+    ev_score, ev_signals = _compute_evidence(raw, raw.meta_property, body_features.outbound_link_count)
+    struct_score, struct_signals = _compute_structure(raw, profile)
+    corr_score, corr_signals = _compute_corroboration()
+
+    subscores = {
+        "stewardship": round(stew_score, 4),
+        "freshness": round(fresh_score, 4),
+        "evidence": round(ev_score, 4),
+        "structure": round(struct_score, 4),
+        "corroboration": round(corr_score, 4),
+    }
+
+    all_signals = stew_signals + fresh_signals + ev_signals + struct_signals + corr_signals
+
+    # 6. Weight renormalization (corroboration entirely missing)
+    missing_subscores = {"corroboration"}
+    renormalized = _renormalize_weights(profile.weights, missing_subscores)
+
+    # 7. Weighted sum
+    weighted_sum = sum(renormalized[k] * subscores[k] for k in renormalized)
+
+    # 8. Hard caps
+    triggered_caps = _evaluate_hard_caps(
+        raw, raw.meta_property, profile, classification, body_features.anti_signal_matches,
+    )
+    cap_multiplier = min((c["cap"] for c in triggered_caps), default=1.0)
+
+    # 9. Final score
+    raw_score = round(100 * cap_multiplier * weighted_sum)
+    # Record class cap (meeting notes, action logs, etc.)
+    if primary_class == "record":
+        raw_score = min(raw_score, profile.record_score_cap)
+    final_score = max(0, min(100, raw_score))
+
+    # 10. Band
+    band = band_for_score(final_score)
+
+    # 11. Confidence
+    confidence = _compute_confidence(all_signals, profile.weights, missing_subscores)
+
+    # 12. Capabilities
+    capabilities = Capabilities()
+
+    # 13. Build result
+    now_iso = datetime.now(timezone.utc).isoformat()
+    result = PageScoreResult(
+        algorithm_version=ALGORITHM_VERSION,
+        profile=profile.name,
+        primary_class=primary_class,
+        subtype=classification.subtype,
+        lifecycle_state=classification.lifecycle_state,
+        score=final_score,
+        band=band,
+        confidence=confidence,
+        hard_caps=triggered_caps,
+        subscores=subscores,
+        page_version=raw.version_number,
+        scored_at=now_iso,
+    )
+
+    if include_signals:
+        result.signals = [s.model_dump(mode="json") for s in all_signals]
+
+    if include_missing:
+        result.missing_signals = list(_ALWAYS_MISSING_SIGNALS)
+        result.capabilities = capabilities.model_dump(mode="json")
+        result.weight_renormalization = {k: round(v, 4) for k, v in renormalized.items()}
+
+    # 14. Write to cache
+    try:
+        if cache is None:
+            cache = TrustCache()
+        if not cache_key:
+            cache_key = TrustCache.make_cache_key(
+                site_url, raw.page_id, raw.version_number, profile.name, primary_class,
+            )
+        result.cache = {"hit": False, "stale": False, "age_seconds": 0}
+        cache.put_page_score(
+            cache_key,
+            result,
+            site_url=site_url,
+            page_id=raw.page_id,
+            page_version=raw.version_number,
+            profile=profile.name,
+            doc_class=primary_class,
+        )
+    except Exception as exc:
+        emit_stderr(f"Trust cache write failed (non-fatal): {exc}")
+        result.cache = None
+
+    return result
