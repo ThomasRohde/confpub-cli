@@ -124,8 +124,9 @@ confpub page inspect --space SD --title "Architecture Overview"
 confpub page inspect --page-id 123456 --format markdown  # convert to Markdown
 confpub page inspect --page-id 123456 --raw              # full API response
 
-# Move a page to a new parent
-confpub page move --page-id 123456 --target-parent "New Parent"
+# Move a page to a new parent (by title or by ID)
+confpub page move --page-id 123456 --target-parent "New Parent" --space SD
+confpub page move --page-id 123456 --target-parent-id 789012
 
 # Delete a page (with optional cascade to children)
 confpub page delete --space SD --title "Old Page"
@@ -133,6 +134,12 @@ confpub page delete --page-id 123456 --cascade
 
 # Pull a page tree to local Markdown
 confpub page pull --space SD --title "Engineering" --recursive --output docs/
+
+# Pull with nested directory layout (mirrors page hierarchy)
+confpub page pull --space SD --title "Engineering" --recursive --layout nested --output docs/
+
+# Pull without downloading attachments
+confpub page pull --page-id 123456 --no-attachments --output docs/
 ```
 
 ## Search
@@ -147,8 +154,14 @@ confpub search --title "Architecture" --space SD
 confpub search --cql "label = 'adr' AND space = 'SD'"
 confpub search --cql "type = 'page' AND lastModified > '2026-03-01'"
 
-# Filter by type
-confpub search --space SD --type page --limit 50
+# Filter by type, with pagination
+confpub search --space SD --type page --limit 50 --start 0
+
+# Include archived spaces in results
+confpub search --space SD --title "legacy" --include-archived
+
+# Control excerpt length (0 = unlimited)
+confpub search --cql "label = 'runbook'" --excerpt-length 500
 ```
 
 ## Space Operations

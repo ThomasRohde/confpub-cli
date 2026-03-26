@@ -8,6 +8,11 @@
 # Learn the full CLI schema (all commands, flags, error codes)
 confpub guide
 
+# Or request a specific section
+confpub guide --section commands
+confpub guide --section error_codes
+confpub guide --section auth
+
 # Check credentials
 confpub auth inspect
 
@@ -76,12 +81,38 @@ After publishing, the JSON response includes a `webui` URL to verify in browser.
 schema_version: "1.0"
 space: SD
 parent: "Engineering"
+
+# Optional: per-manifest connection (overrides env vars)
+confluence:
+  base_url: https://yourorg.atlassian.net/wiki
+  auth:
+    type: token  # Credentials still come from CONFPUB_TOKEN + CONFPUB_USER
+
+# Conflict handling
+conflict_strategy: fail     # fail (default) | overwrite | skip
+on_removal: leave           # leave (default) | delete — what happens when a page is removed from the manifest
+
+# Version message shown in Confluence page history
+version_comment: "Published by confpub @ {timestamp}"
+
+# Global labels — applied to every page in the tree
 labels:
   - auto-published
+
+# Post-apply verification assertions (used by `plan verify`)
+assertions:
+  - type: page.exists
+    title: "Architecture Overview"
+  - type: page.parent
+    title: "ADR-001: Use PostgreSQL"
+    expected_parent: "Architecture Overview"
+
 pages:
   - title: "Architecture Overview"
     file: architecture.md
     labels: [architecture]
+    assets:
+      - diagrams/*.png
     children:
       - title: "ADR-001: Use PostgreSQL"
         file: adrs/adr-001.md
@@ -90,6 +121,25 @@ pages:
         file: adrs/adr-002.md
         labels: [adr]
 ```
+
+**Manifest fields:**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `schema_version` | — | Always `"1.0"` |
+| `space` | — | Confluence space key |
+| `parent` | — | Title of parent page |
+| `confluence` | — | Optional connection overrides (`base_url`, `auth.type`) |
+| `conflict_strategy` | `fail` | `fail` = error on conflict, `overwrite` = force update, `skip` = leave unchanged |
+| `on_removal` | `leave` | `leave` = keep orphaned pages, `delete` = remove pages no longer in manifest |
+| `version_comment` | `"Published by confpub @ {timestamp}"` | Message in Confluence version history |
+| `labels` | `[]` | Labels applied to all pages |
+| `assertions` | `[]` | Post-apply verification checks for `plan verify` |
+| `pages[].title` | — | Page title in Confluence |
+| `pages[].file` | — | Path to Markdown source file |
+| `pages[].labels` | `[]` | Page-specific labels (additive to global) |
+| `pages[].assets` | `[]` | Glob patterns for additional attachments |
+| `pages[].children` | `[]` | Nested child pages (recursive) |
 
 ### Transactional Workflow
 
