@@ -62,7 +62,14 @@ class ConfluenceClient:
     def _handle_error(self, exc: Exception, context: str = "") -> None:
         """Translate atlassian-python-api exceptions to ConfpubError."""
         msg = str(exc)
-        if isinstance(exc, (FileNotFoundError, OSError)) and not isinstance(exc, ConnectionError):
+        # HTTPError is a subclass of OSError — let it fall through to
+        # string matching so we classify by HTTP status, not as a file error.
+        try:
+            from requests.exceptions import HTTPError
+            is_http = isinstance(exc, HTTPError)
+        except ImportError:
+            is_http = False
+        if not is_http and isinstance(exc, (FileNotFoundError, OSError)) and not isinstance(exc, ConnectionError):
             from confpub.errors import ERR_IO_FILE_NOT_FOUND
             raise ConfpubError(
                 ERR_IO_FILE_NOT_FOUND,
@@ -95,8 +102,9 @@ class ConfluenceClient:
                 suggested_action="check_input",
                 details={"note": "This may indicate a nonexistent resource; Confluence returns 403 for both."},
             ) from exc
-        # Not found (404 or explicit "not found")
-        if "404" in msg or "not found" in msg.lower():
+        # Not found (404, "not found", or Java NotFoundException)
+        lower = msg.lower()
+        if "404" in msg or "not found" in lower or "notfound" in lower:
             from confpub.errors import ERR_VALIDATION_NOT_FOUND
             raise ConfpubError(
                 ERR_VALIDATION_NOT_FOUND,
@@ -329,28 +337,45 @@ class ConfluenceClient:
             self._handle_error(exc, "get_attachments")
             return []
 
-    def download_attachment(self, page_id: str, filename: str, download_path: str) -> bool:
+    def download_attachment(
+        self, page_id: str, filename: str, download_path: str,
+        *, raise_on_error: bool = False,
+    ) -> bool:
         """Download an attachment from a page to a local file.
 
         Returns True if the download succeeded, False if the attachment was
-        not found or the download failed.  Failures are logged but do NOT
-        raise — callers can skip individual attachments without aborting the
-        entire pull.
+        not found or the download failed.  When *raise_on_error* is True,
+        raises ConfpubError instead of returning False (used by the CLI
+        ``attachment download`` command for clear error reporting).
         """
         self._call_count += 1
         import os
 
         attachments = self.get_attachments(page_id)
         target = None
+        fname_lower = filename.lower()
         for att in attachments:
-            if att.get("title") == filename:
+            if (att.get("title", "").lower() == fname_lower
+                    or att.get("filename", "").lower() == fname_lower):
                 target = att
                 break
         if target is None:
+            if raise_on_error:
+                from confpub.errors import ERR_VALIDATION_NOT_FOUND
+                raise ConfpubError(
+                    ERR_VALIDATION_NOT_FOUND,
+                    f"Attachment '{filename}' not found on page {page_id}",
+                )
             return False
 
         download_url = target.get("_links", {}).get("download", "")
         if not download_url:
+            if raise_on_error:
+                from confpub.errors import ERR_VALIDATION_NOT_FOUND
+                raise ConfpubError(
+                    ERR_VALIDATION_NOT_FOUND,
+                    f"Attachment '{filename}' has no download URL on page {page_id}",
+                )
             return False
 
         try:
@@ -370,7 +395,13 @@ class ConfluenceClient:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             return True
-        except Exception:
+        except Exception as exc:
+            if raise_on_error:
+                from confpub.errors import ERR_IO_CONNECTION
+                raise ConfpubError(
+                    ERR_IO_CONNECTION,
+                    f"Failed to download attachment '{filename}' from page {page_id}: {exc}",
+                ) from exc
             # Attachment download failures are non-fatal — the caller
             # records a warning and continues with the remaining files.
             return False
@@ -656,7 +687,18 @@ class ConfluenceClient:
         try:
             self._api.delete_page_property(page_id, key)
             return {"deleted": True, "key": key, "page_id": page_id}
+        except ConfpubError:
+            raise
         except Exception as exc:
+            msg = str(exc)
+            # Confluence returns PermissionException for nonexistent properties
+            if "cannot delete" in msg.lower() or ("property" in msg.lower() and "not found" in msg.lower()):
+                from confpub.errors import ERR_VALIDATION_NOT_FOUND
+                raise ConfpubError(
+                    ERR_VALIDATION_NOT_FOUND,
+                    f"Property '{key}' not found on page {page_id}",
+                    suggested_action="check_input",
+                ) from exc
             self._handle_error(exc, "delete_page_property")
             return {}
 
@@ -769,11 +811,13 @@ class ConfluenceClient:
         """Delete an attachment from a page by filename."""
         self._call_count += 1
         try:
-            # Find the attachment ID by filename
+            # Find the attachment ID by filename (case-insensitive)
             attachments = self.get_attachments(page_id)
             target = None
+            fname_lower = filename.lower()
             for att in attachments:
-                if att.get("title") == filename:
+                if (att.get("title", "").lower() == fname_lower
+                        or att.get("filename", "").lower() == fname_lower):
                     target = att
                     break
             if target is None:

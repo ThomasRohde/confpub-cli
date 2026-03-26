@@ -43,14 +43,21 @@ def _resolve_space(cli_space: str | None, required: bool = False, fm_space: str 
 
 
 def _group_callback(
-    quiet: bool = typer.Option(False, "--quiet", help="Suppress progress output on stderr"),
-    verbose: bool = typer.Option(False, "--verbose", help="Include diagnostics in result"),
-    compact: bool = typer.Option(False, "--compact", help="Output single-line JSON (no indentation)"),
+    quiet: Optional[bool] = typer.Option(None, "--quiet", help="Suppress progress output on stderr"),
+    verbose: Optional[bool] = typer.Option(None, "--verbose", help="Include diagnostics in result"),
+    compact: Optional[bool] = typer.Option(None, "--compact", help="Output single-line JSON (no indentation)"),
 ) -> None:
-    """Allow --quiet/--verbose/--compact between the group name and the subcommand."""
-    set_quiet(quiet)
-    set_verbose(verbose)
-    set_compact(compact)
+    """Allow --quiet/--verbose/--compact between the group name and the subcommand.
+
+    Uses Optional[bool] with None default so that defaults don't overwrite
+    flags already set by the root-level main_callback.
+    """
+    if quiet is not None:
+        set_quiet(quiet)
+    if verbose is not None:
+        set_verbose(verbose)
+    if compact is not None:
+        set_compact(compact)
 
 
 page_app = typer.Typer(help="Page operations", callback=_group_callback)
@@ -228,6 +235,9 @@ def page_list(
 ) -> None:
     """List pages in a Confluence space."""
     with command_context("page.list") as ctx:
+        if limit < 1:
+            from confpub.errors import ERR_VALIDATION_REQUIRED
+            raise ConfpubError(ERR_VALIDATION_REQUIRED, "limit must be a positive integer (>= 1)")
         space = _resolve_space(space, required=True)
         ctx.target = {"space": space}
         from confpub.confluence import build_client, _slim_page
@@ -244,7 +254,13 @@ def page_list(
             for sr in search_result.get("results", []):
                 page_id = sr.get("id")
                 if page_id:
-                    pages.append(sr)
+                    # Normalize to _slim_page schema for consistent field names
+                    normalized = {"id": page_id, "title": sr.get("title")}
+                    if sr.get("url"):
+                        normalized["webui"] = sr["url"]
+                    if sr.get("last_modified"):
+                        normalized["version"] = {"when": sr["last_modified"]}
+                    pages.append(normalized)
             ctx.result = {
                 "pages": pages,
                 "start": search_result.get("start", start),
@@ -327,28 +343,9 @@ def page_publish(
     from confpub.front_matter import parse_front_matter
     from confpub.publish import derive_title
 
-    # Parse front-matter from the file (before command_context so title is resolved for target)
-    fm = None
-    source = _Path(file)
-    if source.exists():
-        md_text = source.read_text(encoding="utf-8")
-        fm = parse_front_matter(md_text)
-
-    fm_title = fm.title if fm else None
-    fm_space = fm.space if fm else None
-    fm_parent = fm.parent if fm else None
-    fm_page_id = fm.page_id if fm else None
-    fm_labels = fm.labels if fm else []
-
-    resolved_title = derive_title(file, title, title_from_h1=title_from_h1, front_matter_title=fm_title)
-
-    # Resolve page_id: CLI flag > front-matter
-    effective_page_id = page_id or fm_page_id
-
-    target = {"space": space, "title": resolved_title, "file": file}
-    if effective_page_id:
-        target["page_id"] = effective_page_id
+    target = {"space": space, "file": file}
     with command_context("page.publish", target=target) as ctx:
+        source = _Path(file)
         if not source.exists():
             from confpub.errors import ERR_IO_FILE_NOT_FOUND
             raise ConfpubError(
@@ -358,6 +355,35 @@ def page_publish(
                 retryable=False,
                 suggested_action="fix_input",
             )
+
+        # Parse front-matter (inside command_context so errors get the JSON envelope)
+        try:
+            md_text = source.read_text(encoding="utf-8")
+        except UnicodeDecodeError as e:
+            from confpub.errors import ERR_VALIDATION_MARKDOWN
+            raise ConfpubError(
+                ERR_VALIDATION_MARKDOWN,
+                f"File is not valid UTF-8 text: {file}",
+                details={"file": file, "error": str(e)},
+                suggested_action="fix_input",
+            ) from e
+        fm = parse_front_matter(md_text)
+
+        fm_title = fm.title if fm else None
+        fm_space = fm.space if fm else None
+        fm_parent = fm.parent if fm else None
+        fm_page_id = fm.page_id if fm else None
+        fm_labels = fm.labels if fm else []
+
+        resolved_title = derive_title(file, title, title_from_h1=title_from_h1, front_matter_title=fm_title)
+
+        # Resolve page_id: CLI flag > front-matter
+        effective_page_id = page_id or fm_page_id
+
+        ctx.target["title"] = resolved_title
+        if effective_page_id:
+            ctx.target["page_id"] = effective_page_id
+
         space = _resolve_space(space, required=True, fm_space=fm_space)
         ctx.target["space"] = space
 
@@ -744,6 +770,9 @@ def comment_list(
 ) -> None:
     """List comments on a Confluence page."""
     with command_context("comment.list", target={"page_id": page_id}) as ctx:
+        if limit < 1:
+            from confpub.errors import ERR_VALIDATION_REQUIRED
+            raise ConfpubError(ERR_VALIDATION_REQUIRED, "limit must be a positive integer (>= 1)")
         from confpub.confluence import build_client
         client = build_client()
         ctx.client = client
@@ -869,6 +898,9 @@ def page_history(
 ) -> None:
     """Show version history of a Confluence page."""
     with command_context("page.history", target={"page_id": page_id}) as ctx:
+        if limit < 1:
+            from confpub.errors import ERR_VALIDATION_REQUIRED
+            raise ConfpubError(ERR_VALIDATION_REQUIRED, "limit must be a positive integer (>= 1)")
         from confpub.confluence import build_client
         client = build_client()
         ctx.client = client
@@ -926,7 +958,7 @@ def attachment_download(
         from confpub.confluence import build_client
         client = build_client()
         ctx.client = client
-        success = client.download_attachment(page_id, filename, output)
+        success = client.download_attachment(page_id, filename, output, raise_on_error=True)
         if not success:
             from confpub.errors import ERR_VALIDATION_NOT_FOUND
             raise ConfpubError(ERR_VALIDATION_NOT_FOUND, f"Attachment '{filename}' not found on page {page_id}")
@@ -991,6 +1023,9 @@ def search(
 ) -> None:
     """Search Confluence content using CQL."""
     with command_context("search", target={"cql": cql, "space": space, "title": title, "type": content_type}) as ctx:
+        if limit < 1:
+            from confpub.errors import ERR_VALIDATION_REQUIRED
+            raise ConfpubError(ERR_VALIDATION_REQUIRED, "limit must be a positive integer (>= 1)")
         space = _resolve_space(space)
         # Build effective CQL from flags
         fragments: list[str] = []

@@ -762,3 +762,118 @@ class TestPagePublishFrontMatter:
         data = json.loads(result.output)
         assert data["ok"] is False
         assert "space" in data["errors"][0]["message"].lower()
+
+
+# ===================================================================
+# Bug-fix regression tests (blackbox report 2026-03-26)
+# ===================================================================
+
+
+class TestLimitValidation:
+    """Bugs 5 & 6: --limit 0 and --limit -N should fail with validation error."""
+
+    def test_limit_zero_returns_validation_error(self, monkeypatch):
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: None)
+        result = runner.invoke(app, ["page", "list", "--space", "SD", "--limit", "0"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_REQUIRED"
+
+    def test_limit_negative_returns_validation_error(self, monkeypatch):
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: None)
+        result = runner.invoke(app, ["page", "list", "--space", "SD", "--limit", "-5"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_REQUIRED"
+        assert "positive" in data["errors"][0]["message"].lower()
+
+    def test_search_limit_zero(self, monkeypatch):
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: None)
+        result = runner.invoke(app, ["search", "--space", "SD", "--limit", "0"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_REQUIRED"
+
+
+class TestGlobalFlags:
+    """Bugs 2 & 3: --compact and --verbose at root level should work."""
+
+    def test_compact_at_root_level(self, monkeypatch):
+        def fake_list_pages(self, space, **kwargs):
+            return {"pages": [], "start": 0, "limit": 25, "size": 0, "has_more": False}
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+
+        result = runner.invoke(app, ["--compact", "page", "list", "--space", "SD"])
+        assert result.exit_code == 0
+        # Compact output should be a single line
+        lines = [l for l in result.output.strip().splitlines() if l.strip()]
+        assert len(lines) == 1
+        data = json.loads(lines[0])
+        assert data["ok"] is True
+
+    def test_compact_at_subcommand_level_still_works(self, monkeypatch):
+        def fake_list_pages(self, space, **kwargs):
+            return {"pages": [], "start": 0, "limit": 25, "size": 0, "has_more": False}
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "list_pages", fake_list_pages)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+
+        result = runner.invoke(app, ["page", "--compact", "list", "--space", "SD"])
+        assert result.exit_code == 0
+        lines = [l for l in result.output.strip().splitlines() if l.strip()]
+        assert len(lines) == 1
+        data = json.loads(lines[0])
+        assert data["ok"] is True
+
+
+class TestBinaryFileHandling:
+    """Bug 4: Publishing a binary file should return JSON error, not traceback."""
+
+    def test_binary_file_returns_json_error(self, tmp_path):
+        binary_file = tmp_path / "binary.md"
+        binary_file.write_bytes(b"\x00\x01\x02\x03\x89PNG\r\n")
+
+        result = runner.invoke(app, [
+            "page", "publish", str(binary_file),
+            "--space", "SD", "--parent", "Test", "--title", "Binary Test",
+        ])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert "ERR_VALIDATION_MARKDOWN" == data["errors"][0]["code"]
+        assert "utf-8" in data["errors"][0]["message"].lower()
+
+
+class TestLabelSearchSchema:
+    """Bug 7: page list --label should return same field names as regular page list."""
+
+    def test_label_results_use_webui_field(self, monkeypatch):
+        def fake_search(self, cql, **kwargs):
+            return {
+                "results": [
+                    {"id": "123", "title": "Test Page", "url": "https://example.com/page"},
+                ],
+                "start": 0,
+                "limit": 25,
+                "has_more": False,
+            }
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "search", fake_search)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+
+        result = runner.invoke(app, ["page", "list", "--space", "SD", "--label", "test"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        page = data["result"]["pages"][0]
+        # Should use "webui" not "url"
+        assert "webui" in page
+        assert "url" not in page
+        assert page["webui"] == "https://example.com/page"

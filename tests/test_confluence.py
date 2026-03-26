@@ -39,6 +39,54 @@ def client(mock_config):
         return c
 
 
+class TestHandleError:
+    """Tests for _handle_error error-code classification."""
+
+    def test_http_error_not_mapped_to_file_not_found(self, client):
+        """HTTPError (a subclass of OSError) should NOT be mapped to ERR_IO_FILE_NOT_FOUND."""
+        from requests.exceptions import HTTPError
+        exc = HTTPError("400 Client Error: Bad Request")
+        with pytest.raises(ConfpubError) as exc_info:
+            client._handle_error(exc, "test")
+        # Should NOT be ERR_IO_FILE_NOT_FOUND — that's the bug we fixed
+        assert exc_info.value.code != ERR_IO_FILE_NOT_FOUND
+
+    def test_http_404_mapped_to_not_found(self, client):
+        """HTTPError with 404 in message should map to ERR_VALIDATION_NOT_FOUND."""
+        from requests.exceptions import HTTPError
+        exc = HTTPError("404 Client Error: Not Found")
+        with pytest.raises(ConfpubError) as exc_info:
+            client._handle_error(exc, "test")
+        assert exc_info.value.code == ERR_VALIDATION_NOT_FOUND
+
+    def test_java_not_found_exception_mapped_correctly(self, client):
+        """Java NotFoundException (no space in 'NotFound') should map to ERR_VALIDATION_NOT_FOUND."""
+        exc = Exception("com.atlassian.confluence.api.service.exceptions.api.NotFoundException")
+        with pytest.raises(ConfpubError) as exc_info:
+            client._handle_error(exc, "test")
+        assert exc_info.value.code == ERR_VALIDATION_NOT_FOUND
+
+    def test_real_file_not_found_still_works(self, client):
+        """Actual FileNotFoundError should still map to ERR_IO_FILE_NOT_FOUND."""
+        exc = FileNotFoundError("No such file: /tmp/missing.md")
+        with pytest.raises(ConfpubError) as exc_info:
+            client._handle_error(exc, "test")
+        assert exc_info.value.code == ERR_IO_FILE_NOT_FOUND
+
+
+class TestDeletePageProperty:
+    def test_nonexistent_property_raises_not_found(self, client):
+        """Deleting a nonexistent property should raise ERR_VALIDATION_NOT_FOUND."""
+        client._mock_api.delete_page_property.side_effect = Exception(
+            "com.atlassian.confluence.api.service.exceptions.api.PermissionException: "
+            "Cannot delete content property: JsonContentProperty{id='null', key='missing'}"
+        )
+        with pytest.raises(ConfpubError) as exc_info:
+            client.delete_page_property("123", "missing")
+        assert exc_info.value.code == ERR_VALIDATION_NOT_FOUND
+        assert "missing" in exc_info.value.error_message
+
+
 class TestClientConstruction:
     def test_requires_credentials(self):
         config = ResolvedConfig()
@@ -268,6 +316,38 @@ class TestDownloadAttachment:
         }
         result = client.download_attachment("1", "missing.png", str(tmp_path / "x"))
         assert result is False
+
+    def test_case_insensitive_match(self, client, tmp_path):
+        """Attachment download should match filenames case-insensitively."""
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"title": "Doc.PDF", "_links": {"download": "/download/Doc.PDF"}}]
+        }
+        client._mock_api.url = "https://test.atlassian.net/wiki"
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [b"DATA"]
+        client._mock_api._session.get.return_value = mock_resp
+
+        dest = str(tmp_path / "doc.pdf")
+        result = client.download_attachment("1", "doc.pdf", dest)
+        assert result is True
+
+    def test_raise_on_error_not_found(self, client, tmp_path):
+        """raise_on_error=True should raise ConfpubError when attachment not found."""
+        client._mock_api.get_attachments_from_content.return_value = {"results": []}
+        with pytest.raises(ConfpubError) as exc_info:
+            client.download_attachment("1", "missing.png", str(tmp_path / "x"), raise_on_error=True)
+        assert exc_info.value.code == ERR_VALIDATION_NOT_FOUND
+
+    def test_raise_on_error_http_failure(self, client, tmp_path):
+        """raise_on_error=True should raise ConfpubError on HTTP failure."""
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"title": "bad.zip", "_links": {"download": "/download/bad.zip"}}]
+        }
+        client._mock_api.url = "https://test.atlassian.net/wiki"
+        client._mock_api._session.get.side_effect = Exception("500 Server Error")
+        with pytest.raises(ConfpubError) as exc_info:
+            client.download_attachment("1", "bad.zip", str(tmp_path / "x"), raise_on_error=True)
+        assert exc_info.value.code == ERR_IO_CONNECTION
 
 
 class TestLabels:
