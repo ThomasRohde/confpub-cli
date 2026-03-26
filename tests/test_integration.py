@@ -675,7 +675,11 @@ class TestPagePublishFrontMatter:
         from unittest.mock import MagicMock
 
         mock_client = MagicMock()
-        mock_client.get_page.return_value = None
+        def _get_page(space, title, **kw):
+            if title == "Docs":
+                return {"id": "parent_1"}
+            return None
+        mock_client.get_page.side_effect = _get_page
         mock_client.create_page.return_value = {"id": "new_1", "version": {"number": 1}}
         mock_client.get_attachments.return_value = []
 
@@ -697,7 +701,11 @@ class TestPagePublishFrontMatter:
         from unittest.mock import MagicMock
 
         mock_client = MagicMock()
-        mock_client.get_page.return_value = None
+        def _get_page(space, title, **kw):
+            if title == "CLI Parent":
+                return {"id": "parent_1"}
+            return None
+        mock_client.get_page.side_effect = _get_page
         mock_client.create_page.return_value = {"id": "new_2", "version": {"number": 1}}
         mock_client.get_attachments.return_value = []
 
@@ -727,7 +735,11 @@ class TestPagePublishFrontMatter:
         from unittest.mock import MagicMock
 
         mock_client = MagicMock()
-        mock_client.get_page.return_value = None
+        def _get_page(space, title, **kw):
+            if title == "Docs":
+                return {"id": "parent_1"}
+            return None
+        mock_client.get_page.side_effect = _get_page
         mock_client.create_page.return_value = {"id": "new_3", "version": {"number": 1}}
         mock_client.get_attachments.return_value = []
         mock_client.set_labels.return_value = []
@@ -877,3 +889,80 @@ class TestLabelSearchSchema:
         assert "webui" in page
         assert "url" not in page
         assert page["webui"] == "https://example.com/page"
+
+
+class TestPageInspectFormatValidation:
+    """Bug 3: page inspect --format invalid should reject unknown formats."""
+
+    def test_invalid_format_rejected(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        mock_client = MagicMock()
+        mock_client.get_page_by_id.return_value = {
+            "id": "123", "title": "Test", "type": "page",
+            "space": {"key": "SD"},
+            "version": {"number": 1},
+            "body": {"storage": {"value": "<p>hi</p>"}},
+            "_links": {"webui": "/spaces/SD/pages/123"},
+        }
+        mock_client._config.base_url = "https://test.atlassian.net/wiki"
+        mock_client._config.is_cloud = True
+
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: mock_client)
+
+        result = runner.invoke(app, ["page", "inspect", "--page-id", "123", "--format", "invalid"])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert "ERR_VALIDATION_REQUIRED" == data["errors"][0]["code"]
+        assert "storage" in data["errors"][0]["message"]
+        assert "markdown" in data["errors"][0]["message"]
+
+    def test_storage_format_accepted(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        mock_client = MagicMock()
+        mock_client.get_page_by_id.return_value = {
+            "id": "123", "title": "Test", "type": "page",
+            "space": {"key": "SD"},
+            "version": {"number": 1},
+            "body": {"storage": {"value": "<p>hi</p>"}},
+            "_links": {"webui": "/spaces/SD/pages/123"},
+        }
+        mock_client.get_labels.return_value = []
+        mock_client._config.base_url = "https://test.atlassian.net/wiki"
+        mock_client._config.is_cloud = True
+
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: mock_client)
+
+        result = runner.invoke(app, ["page", "inspect", "--page-id", "123", "--format", "storage"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["ok"] is True
+
+
+class TestPagePublishParentValidation:
+    """Bug 2: publish with non-existent parent should error, not silently create under root."""
+
+    def test_nonexistent_parent_errors(self, monkeypatch, tmp_path):
+        md_file = tmp_path / "test.md"
+        md_file.write_text("# Test\n\nHello world", encoding="utf-8")
+
+        def fake_get_page(self, space, title, **kwargs):
+            # Parent lookup returns None (not found)
+            return None
+
+        from confpub.confluence import ConfluenceClient
+        monkeypatch.setattr(ConfluenceClient, "get_page", fake_get_page)
+        monkeypatch.setattr("confpub.confluence.build_client", lambda: ConfluenceClient.__new__(ConfluenceClient))
+
+        result = runner.invoke(app, [
+            "page", "publish", str(md_file),
+            "--space", "SD",
+            "--parent", "Nonexistent Parent XYZ",
+        ])
+        assert result.exit_code == 10
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["errors"][0]["code"] == "ERR_VALIDATION_NOT_FOUND"
+        assert "Nonexistent Parent XYZ" in data["errors"][0]["message"]

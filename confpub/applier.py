@@ -99,7 +99,32 @@ def apply_plan(
         parent_title = page.parent_title or plan.parent
         parent_id = parent_ids.get(parent_title)
 
-        if page.operation == "create":
+        # Re-evaluate operation during dry-run based on current state
+        effective_operation = page.operation
+        effective_page_id = page.confluence_page_id
+        if dry_run and page.operation == "create":
+            local_fp = fingerprint_content(storage)
+            if page.title in lockfile.pages:
+                effective_page_id = lockfile.pages[page.title].page_id
+                remote_fp = client.fingerprint_page(effective_page_id)
+                if remote_fp is not None:
+                    effective_operation = "noop" if remote_fp == local_fp else "update"
+            else:
+                existing = client.get_page(plan.space, page.title)
+                if existing:
+                    effective_page_id = str(existing["id"])
+                    remote_fp = client.fingerprint_page(effective_page_id)
+                    effective_operation = "noop" if remote_fp == local_fp else "update"
+
+        if effective_operation == "noop":
+            changes.append({
+                "type": "page.noop",
+                "title": page.title,
+                "confluence_page_id": effective_page_id,
+            })
+            continue
+
+        if effective_operation == "create":
             change: dict[str, Any] = {
                 "type": "page.create",
                 "title": page.title,
@@ -155,7 +180,7 @@ def apply_plan(
             counts["create"] += 1
             changes.append(change)
 
-        elif page.operation == "update":
+        elif effective_operation == "update":
             before_version = None
             backup_path = None
             if not dry_run and page.confluence_page_id:
@@ -178,7 +203,7 @@ def apply_plan(
             change = {
                 "type": "page.update",
                 "title": page.title,
-                "confluence_page_id": page.confluence_page_id,
+                "confluence_page_id": effective_page_id or page.confluence_page_id,
                 "before": {"version": before_version} if before_version else None,
                 "after": {},
             }

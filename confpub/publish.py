@@ -191,6 +191,13 @@ def publish_page(
     if operation == "create":
         # Find parent page
         parent_page = client.get_page(space, parent)
+        if parent and not parent_page:
+            from confpub.errors import ERR_VALIDATION_NOT_FOUND
+            raise ConfpubError(
+                ERR_VALIDATION_NOT_FOUND,
+                f"Parent page '{parent}' not found in space '{space}'",
+                suggested_action="fix_input",
+            )
         parent_id = str(parent_page["id"]) if parent_page else None
 
         result = client.create_page(space, page_title, storage, parent_id=parent_id)

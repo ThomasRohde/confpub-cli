@@ -163,6 +163,11 @@ class TestPublishCreate:
     @patch("confpub.publish.load_config")
     @patch("confpub.publish.ConfluenceClient")
     def test_updates_lockfile(self, MockClient, mock_config, source_dir, mock_client):
+        def get_page_side_effect(space, title):
+            if title == "Root":
+                return {"id": "root_1"}
+            return None
+        mock_client.get_page.side_effect = get_page_side_effect
         MockClient.return_value = mock_client
         mock_config.return_value = MagicMock()
 

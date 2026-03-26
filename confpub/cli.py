@@ -307,6 +307,8 @@ def page_inspect(
         if not page:
             from confpub.errors import ERR_VALIDATION_NOT_FOUND
             raise ConfpubError(ERR_VALIDATION_NOT_FOUND, f"Page not found")
+        if not raw and format not in ("storage", "markdown"):
+            raise ConfpubError("ERR_VALIDATION_REQUIRED", f"--format must be 'storage' or 'markdown', got '{format}'")
         if raw:
             ctx.result = page
         else:

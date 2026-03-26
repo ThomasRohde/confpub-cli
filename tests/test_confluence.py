@@ -350,6 +350,77 @@ class TestDownloadAttachment:
         assert exc_info.value.code == ERR_IO_CONNECTION
 
 
+    def test_bare_filename_succeeds(self, client, tmp_path, monkeypatch):
+        """Bare filename (no directory) should write to CWD without WinError 3."""
+        monkeypatch.chdir(tmp_path)
+        client._mock_api.get_attachments_from_content.return_value = {
+            "results": [{"title": "doc.txt", "_links": {"download": "/download/doc.txt"}}]
+        }
+        client._mock_api.url = "https://test.atlassian.net/wiki"
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [b"CONTENT"]
+        client._mock_api._session.get.return_value = mock_resp
+
+        result = client.download_attachment("1", "doc.txt", "doc.txt")
+        assert result is True
+        assert (tmp_path / "doc.txt").read_bytes() == b"CONTENT"
+
+
+class TestSanitizeApiMessage:
+    """Tests for _sanitize_api_message helper."""
+
+    def test_strips_java_exception_class(self):
+        msg = "com.atlassian.confluence.api.service.exceptions.api.NotFoundException: Cannot find content version: ContentId{id=11337730}, 999"
+        cleaned = ConfluenceClient._sanitize_api_message(msg)
+        assert "com.atlassian" not in cleaned
+        assert "NotFoundException" not in cleaned
+        assert "page 11337730" in cleaned
+
+    def test_strips_permission_exception(self):
+        msg = "com.atlassian.confluence.api.service.exceptions.api.PermissionException: Cannot delete content property"
+        cleaned = ConfluenceClient._sanitize_api_message(msg)
+        assert "com.atlassian" not in cleaned
+        assert "PermissionException" not in cleaned
+        assert "Cannot delete content property" in cleaned
+
+    def test_plain_message_unchanged(self):
+        msg = "Page not found"
+        cleaned = ConfluenceClient._sanitize_api_message(msg)
+        assert cleaned == "Page not found"
+
+    def test_empty_after_strip_returns_original(self):
+        msg = "java.lang.NullPointerException"
+        cleaned = ConfluenceClient._sanitize_api_message(msg)
+        # Should not be empty — falls back to original
+        assert len(cleaned) > 0
+
+
+class TestHandleError403Message:
+    """Tests for improved 403 error messages."""
+
+    def test_403_includes_possible_causes(self, client):
+        exc = Exception("403 Forbidden")
+        with pytest.raises(ConfpubError) as exc_info:
+            client._handle_error(exc, "get_page")
+        assert exc_info.value.code == ERR_AUTH_FORBIDDEN
+        assert "possible_causes" in exc_info.value.details
+        assert "resource_not_found" in exc_info.value.details["possible_causes"]
+
+    def test_403_message_includes_context(self, client):
+        exc = Exception("403 Forbidden")
+        with pytest.raises(ConfpubError) as exc_info:
+            client._handle_error(exc, "delete_page")
+        assert "delete_page" in exc_info.value.error_message
+
+    def test_not_found_message_sanitized(self, client):
+        exc = Exception("com.atlassian.confluence.api.service.exceptions.api.NotFoundException: Cannot find content version: ContentId{id=11337730}, 999")
+        with pytest.raises(ConfpubError) as exc_info:
+            client._handle_error(exc, "get_version")
+        assert exc_info.value.code == ERR_VALIDATION_NOT_FOUND
+        assert "com.atlassian" not in exc_info.value.error_message
+        assert "page 11337730" in exc_info.value.error_message
+
+
 class TestLabels:
     def test_get_labels(self, client):
         client._mock_api.get_page_labels.return_value = {

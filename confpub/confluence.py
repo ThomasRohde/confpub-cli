@@ -59,6 +59,18 @@ class ConfluenceClient:
 
         return Confluence(**kwargs)
 
+    @staticmethod
+    def _sanitize_api_message(msg: str) -> str:
+        """Strip Java exception class names from API error messages."""
+        import re
+        # "com.atlassian...SomeException: actual message" → "actual message"
+        cleaned = re.sub(r'[\w.]+(?:Exception|Error)(?::\s*)?', '', msg).strip()
+        # ContentId{id=12345} → page 12345
+        cleaned = re.sub(r'ContentId\{id=(\d+)\}', r'page \1', cleaned)
+        # Clean up leftover punctuation
+        cleaned = re.sub(r'^[,;:\s]+', '', cleaned)
+        return cleaned or msg
+
     def _handle_error(self, exc: Exception, context: str = "") -> None:
         """Translate atlassian-python-api exceptions to ConfpubError."""
         msg = str(exc)
@@ -86,9 +98,13 @@ class ConfluenceClient:
         if "403" in msg or "Forbidden" in msg:
             raise ConfpubError(
                 ERR_AUTH_FORBIDDEN,
-                f"Permission denied: {msg}",
+                f"Access denied or resource not found ({context}): {self._sanitize_api_message(msg)}",
                 suggested_action="check_input",
-                details={"note": "Confluence returns HTTP 403 for both forbidden and nonexistent resources. Verify the resource exists."},
+                details={
+                    "note": "Confluence returns HTTP 403 for both forbidden and nonexistent resources. "
+                            "Verify the space key, page ID, or title exists before checking permissions.",
+                    "possible_causes": ["resource_not_found", "insufficient_permissions"],
+                },
             ) from exc
         if "timeout" in msg.lower() or "Timeout" in msg:
             raise ConfpubError(ERR_IO_TIMEOUT, f"Request timed out: {msg}") from exc
@@ -98,9 +114,13 @@ class ConfluenceClient:
         if "permission" in msg.lower() or "not permitted" in msg.lower():
             raise ConfpubError(
                 ERR_AUTH_FORBIDDEN,
-                f"Permission denied ({context}): {msg}",
+                f"Access denied or resource not found ({context}): {self._sanitize_api_message(msg)}",
                 suggested_action="check_input",
-                details={"note": "This may indicate a nonexistent resource; Confluence returns 403 for both."},
+                details={
+                    "note": "Confluence returns HTTP 403 for both forbidden and nonexistent resources. "
+                            "Verify the space key, page ID, or title exists before checking permissions.",
+                    "possible_causes": ["resource_not_found", "insufficient_permissions"],
+                },
             ) from exc
         # Not found (404, "not found", or Java NotFoundException)
         lower = msg.lower()
@@ -108,7 +128,7 @@ class ConfluenceClient:
             from confpub.errors import ERR_VALIDATION_NOT_FOUND
             raise ConfpubError(
                 ERR_VALIDATION_NOT_FOUND,
-                f"Resource not found ({context}): {msg}",
+                f"Resource not found ({context}): {self._sanitize_api_message(msg)}",
             ) from exc
         raise ConfpubError(ERR_INTERNAL_SDK, f"Unexpected API error ({context}): {msg}") from exc
 
@@ -390,7 +410,9 @@ class ConfluenceClient:
             response = self._api._session.get(full_url, stream=True)
             response.raise_for_status()
 
-            os.makedirs(os.path.dirname(download_path), exist_ok=True)
+            parent_dir = os.path.dirname(download_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
             with open(download_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)

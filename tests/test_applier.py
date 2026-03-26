@@ -51,7 +51,11 @@ def plan_dir(tmp_path):
 @pytest.fixture
 def mock_client():
     client = MagicMock()
-    client.get_page.return_value = {"id": "root_id"}
+    def _get_page(space, title, **kw):
+        if title == "Root":
+            return {"id": "root_id"}
+        return None
+    client.get_page.side_effect = _get_page
     client.create_page.return_value = {"id": "789", "version": {"number": 1}}
     client.update_page.return_value = {"id": "456", "version": {"number": 3}}
     client.get_page_by_id.return_value = {
@@ -295,3 +299,93 @@ class TestFingerprintCheck:
             skip_fingerprint_check=True,
         )
         assert result["summary"]["update"] == 1
+
+
+class TestDryRunReEvaluation:
+    """Bug 4: dry-run should re-evaluate operations against current state."""
+
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_dry_run_detects_already_created_page_via_lockfile(self, MockClient, mock_config, tmp_path, mock_client):
+        """When lockfile says a page exists, dry-run should show update/noop not create."""
+        plan_data = {
+            "schema_version": "1.0",
+            "created_at": "2026-02-28T14:30:00Z",
+            "space": "DEV",
+            "parent": "Root",
+            "pages": [
+                {
+                    "id": "plan_1",
+                    "title": "New Page",
+                    "source_file": "new.md",
+                    "confluence_page_id": None,
+                    "current_fingerprint": None,
+                    "operation": "create",
+                    "attachments": [],
+                },
+            ],
+            "summary": {"create": 1, "update": 0, "noop": 0, "attachments_to_upload": 0},
+        }
+        plan_file = tmp_path / "plan.json"
+        plan_file.write_text(json.dumps(plan_data))
+        (tmp_path / "new.md").write_text("# New Page\n\nContent here.")
+
+        # Lockfile says this page already exists
+        from confpub.lockfile import Lockfile, LockPageEntry, save_lockfile
+        lock = Lockfile()
+        lock.pages["New Page"] = LockPageEntry(page_id="999", version=1, content_fingerprint="different_fp")
+        save_lockfile(tmp_path / "confpub.lock", lock)
+
+        mock_client.fingerprint_page.return_value = "different_fp"
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_file), dry_run=True)
+
+        assert result["dry_run"] is True
+        assert any(c["type"] == "page.update" for c in result["changes"])
+        assert not any(c["type"] == "page.create" for c in result["changes"])
+
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_dry_run_detects_already_created_page_via_confluence(self, MockClient, mock_config, tmp_path, mock_client):
+        """When Confluence has the page (no lockfile), dry-run should show update not create."""
+        plan_data = {
+            "schema_version": "1.0",
+            "created_at": "2026-02-28T14:30:00Z",
+            "space": "DEV",
+            "parent": "Root",
+            "pages": [
+                {
+                    "id": "plan_1",
+                    "title": "New Page",
+                    "source_file": "new.md",
+                    "confluence_page_id": None,
+                    "current_fingerprint": None,
+                    "operation": "create",
+                    "attachments": [],
+                },
+            ],
+            "summary": {"create": 1, "update": 0, "noop": 0, "attachments_to_upload": 0},
+        }
+        plan_file = tmp_path / "plan.json"
+        plan_file.write_text(json.dumps(plan_data))
+        (tmp_path / "new.md").write_text("# New Page\n\nContent here.")
+
+        def fake_get_page(space, title, **kwargs):
+            if title == "Root":
+                return {"id": "root_id"}
+            if title == "New Page":
+                return {"id": "existing_999"}
+            return None
+
+        mock_client.get_page.side_effect = fake_get_page
+        mock_client.fingerprint_page.return_value = "different_fp"
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = apply_plan(str(plan_file), dry_run=True)
+
+        assert result["dry_run"] is True
+        assert any(c["type"] == "page.update" for c in result["changes"])
+        assert not any(c["type"] == "page.create" for c in result["changes"])
