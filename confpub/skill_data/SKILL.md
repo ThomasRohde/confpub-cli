@@ -41,16 +41,18 @@ The Design Philosophy above governs visual structure. These standards govern the
 
 ## Quick Publishing Workflow
 
+If `confpub` is not installed, use `uvx confpub-cli` instead (runs without install).
+
 ```bash
 # Single page
-python -m confpub page publish page.md --space SD --parent "Engineering" --label adr
+confpub page publish page.md --space SD --parent "Engineering" --label adr
 
 # Multi-page tree
-python -m confpub plan create --manifest confpub.yaml
-python -m confpub plan apply --plan confpub-plan.json
+confpub plan create --manifest confpub.yaml
+confpub plan apply --plan confpub-plan.json
 
 # Always dry-run first for safety
-python -m confpub page publish page.md --space SD --dry-run
+confpub page publish page.md --space SD --dry-run
 ```
 
 For manifest structure, labels strategy, and advanced publishing workflows, read `references/workflow.md`.
@@ -132,7 +134,7 @@ When the user asks about managing existing pages or Confluence operations beyond
 
 | User Intent | Read |
 |-------------|------|
-| Comments, properties, attachments, labels, history, search, export | `references/page-management.md` |
+| Browsing pages, comments, properties, attachments, labels, history, search, export | `references/page-management.md` |
 
 ### Publishing Workflow
 
@@ -140,4 +142,4 @@ When the user asks about publishing, manifests, labels, or lockfiles:
 
 | User Intent | Read |
 |-------------|------|
-| Manifests, labels strategy, multi-page workflows, error recovery | `references/workflow.md` |
+| Agent setup, auth, config, env vars, manifests, labels, multi-page workflows, error recovery | `references/workflow.md` |

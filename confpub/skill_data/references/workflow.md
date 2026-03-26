@@ -1,19 +1,69 @@
 # Publishing Workflow
 
+## Agent Setup & Configuration
+
+### Bootstrap
+
+```bash
+# Learn the full CLI schema (all commands, flags, error codes)
+confpub guide
+
+# Check credentials
+confpub auth inspect
+
+# View current config
+confpub config inspect
+
+# Set config values
+confpub config set base_url https://yourorg.atlassian.net/wiki
+confpub config set user you@example.com
+```
+
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `CONFPUB_URL` | Confluence base URL |
+| `CONFPUB_USER` | Email or username |
+| `CONFPUB_TOKEN` | API token (Cloud) or PAT (Server/DC) |
+| `CONFPUB_SPACE` | Default space key (avoids `--space` on every command) |
+| `CONFPUB_SSL_VERIFY` | SSL verification (`true`/`false` or CA bundle path) |
+| `LLM=true` | Suppress interactive prompts; return structured errors instead |
+
+**Credential precedence:** CLI flags > environment variables > config file (`~/.config/confpub/config.json`) > OS keychain.
+
+### Installing the Skill
+
+```bash
+# Auto-detect agents in the current repo and install the confpub skill
+confpub skill install
+
+# Install for specific agents
+confpub skill install --agent claude --agent copilot
+
+# Check which agents are detected
+confpub skill inspect
+```
+
 ## Single Page (Fast Path)
 
 ```bash
 # Dry-run first
-python -m confpub page publish doc.md --space SD --parent "Engineering" --dry-run
+confpub page publish doc.md --space SD --parent "Engineering" --dry-run
 
 # Publish with labels
-python -m confpub page publish doc.md --space SD --parent "Engineering" \
+confpub page publish doc.md --space SD --parent "Engineering" \
   --label architecture --label approved
 
 # Title options
 --title "Custom Title"          # explicit title
 --title-from-h1                 # use first # heading
 # (default: filename → title case)
+```
+
+Use `--backup` to save existing page content before overwriting:
+```bash
+confpub page publish doc.md --space SD --parent "Engineering" --backup
 ```
 
 After publishing, the JSON response includes a `webui` URL to verify in browser.
@@ -45,16 +95,16 @@ pages:
 
 ```bash
 # 1. Plan — generates confpub-plan.json (no writes)
-python -m confpub plan create --manifest confpub.yaml
+confpub plan create --manifest confpub.yaml
 
 # 2. Validate — checks for drift
-python -m confpub plan validate --plan confpub-plan.json
+confpub plan validate --plan confpub-plan.json
 
 # 3. Apply — executes the plan
-python -m confpub plan apply --plan confpub-plan.json
+confpub plan apply --plan confpub-plan.json
 
 # 4. Verify — assert post-conditions
-python -m confpub plan verify --plan confpub-plan.json
+confpub plan verify --plan confpub-plan.json
 ```
 
 Plan → validate → apply → verify separates "what will change" from "do it." Plans are JSON artifacts that can be reviewed, diffed, and versioned.
