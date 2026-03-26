@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "created_at": "2026-03-26T04:17:30.340503+00:00",
+  "space": "SD",
+  "parent": "Software Development",
+  "pages": [
+    {
+      "id": "plan_1",
+      "title": "Project Phoenix Overview",
+      "source_file": "project-overview.md",
+      "confluence_page_id": "10911750",
+      "current_fingerprint": "cf8dcd0345d7b68578414bf173133effd973e6252f9208a52b87257f3856fd0d",
+      "operation": "update",
+      "parent_title": "Software Development",
+      "attachments": [],
+      "labels": [
+        "confpub-skill-test",
+        "auto-published",
+        "project-dashboard"
+      ]
+    },
+    {
+      "id": "plan_2",
+      "title": "ADR-001 Use PostgreSQL for Phoenix",
+      "source_file": "adr-001.md",
+      "confluence_page_id": "11042823",
+      "current_fingerprint": "b803665051f633c8e4bd16f1fec444654bf3628015c9ef89ef555b15d8cd95c9",
+      "operation": "update",
+      "parent_title": "Project Phoenix Overview",
+      "attachments": [],
+      "labels": [
+        "confpub-skill-test",
+        "auto-published",
+        "adr",
+        "architecture"
+      ]
+    },
+    {
+      "id": "plan_3",
+      "title": "Runbook PostgreSQL Database Failover",
+      "source_file": "runbook-db-failover.md",
+      "confluence_page_id": "10911772",
+      "current_fingerprint": "c24efbdd3376595434ddd06683fd9c2d3afb8479caaff217a23a44f5523eb2c7",
+      "operation": "update",
+      "parent_title": "Project Phoenix Overview",
+      "attachments": [],
+      "labels": [
+        "confpub-skill-test",
+        "auto-published",
+        "runbook",
+        "operations"
+      ]
+    }
+  ],
+  "summary": {
+    "create": 0,
+    "update": 3,
+    "noop": 0,
+    "attachments_to_upload": 0,
+    "labels_to_apply": 11
+  }
+}

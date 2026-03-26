@@ -1,0 +1,23 @@
+schema_version: "1.0"
+space: SD
+parent: "Software Development"
+labels:
+  - confpub-skill-test
+  - auto-published
+
+pages:
+  - title: "Project Phoenix Overview"
+    file: project-overview.md
+    labels:
+      - project-dashboard
+    children:
+      - title: "ADR-001 Use PostgreSQL for Phoenix"
+        file: adr-001.md
+        labels:
+          - adr
+          - architecture
+      - title: "Runbook PostgreSQL Database Failover"
+        file: runbook-db-failover.md
+        labels:
+          - runbook
+          - operations
