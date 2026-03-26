@@ -62,6 +62,7 @@ attachment_app = typer.Typer(help="Attachment operations", callback=_group_callb
 label_app = typer.Typer(help="Label operations", callback=_group_callback)
 comment_app = typer.Typer(help="Comment operations", callback=_group_callback)
 property_app = typer.Typer(help="Page property operations", callback=_group_callback)
+skill_app = typer.Typer(help="Skill management", callback=_group_callback)
 
 # ---------------------------------------------------------------------------
 # Main app
@@ -82,6 +83,7 @@ app.add_typer(attachment_app, name="attachment")
 app.add_typer(label_app, name="label")
 app.add_typer(comment_app, name="comment")
 app.add_typer(property_app, name="property")
+app.add_typer(skill_app, name="skill")
 
 
 def _version_callback(value: bool) -> None:
@@ -1062,6 +1064,38 @@ def guide(
             ctx.result = result
         else:
             ctx.result = full_guide
+
+
+# ---------------------------------------------------------------------------
+# skill group
+# ---------------------------------------------------------------------------
+
+
+@skill_app.command("install")
+def skill_install(
+    agent: Optional[list[str]] = typer.Option(None, "--agent", help="Target agent(s): claude, copilot, cursor, windsurf, agents-md"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing skill files"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview installation without writing"),
+) -> None:
+    """Install the confpub publishing skill into the current repo."""
+    with command_context("skill.install") as ctx:
+        from confpub.skill_installer import install_skill
+        from pathlib import Path
+
+        root = Path.cwd()
+        result = install_skill(root, agents=agent, force=force, dry_run=dry_run)
+        ctx.result = result
+
+
+@skill_app.command("inspect")
+def skill_inspect_cmd() -> None:
+    """Detect coding agents and show skill installation status."""
+    with command_context("skill.inspect") as ctx:
+        from confpub.skill_installer import inspect_skill
+        from pathlib import Path
+
+        root = Path.cwd()
+        ctx.result = inspect_skill(root)
 
 
 # ---------------------------------------------------------------------------

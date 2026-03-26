@@ -398,6 +398,34 @@ def build_guide() -> dict[str, Any]:
                 "description": "Show current configuration",
                 "flags": [],
             },
+            "skill.install": {
+                "group": "skill",
+                "mutates": True,
+                "description": "Install the confpub publishing skill into the current repo",
+                "flags": ["--agent", "--force", "--dry-run"],
+                "agent_hint": (
+                    "Auto-detects coding agents (Claude, Copilot, Cursor, Windsurf, AGENTS.md) "
+                    "in CWD and installs the skill in each agent's format. "
+                    "Use --agent to target specific agents. No Confluence credentials needed."
+                ),
+                "result_schema": {
+                    "dry_run": "bool",
+                    "agents": "list of {name, detected_by, skill_dir, files_written, entry_file}",
+                    "total_files_written": "int",
+                    "version": "string",
+                },
+            },
+            "skill.inspect": {
+                "group": "skill",
+                "mutates": False,
+                "description": "Detect coding agents and show skill installation status",
+                "flags": [],
+                "result_schema": {
+                    "detected_agents": "list of {name, detected_by, installed, installed_version}",
+                    "skill_version": "string",
+                    "skill_files": "int",
+                },
+            },
         },
         "error_codes": {
             ERR_VALIDATION_REQUIRED: _error_code_entry(ERR_VALIDATION_REQUIRED),
