@@ -19,6 +19,26 @@ Great Confluence pages let readers scan — they never force anyone to read para
 6. **Labels for discoverability** — Every page gets labels: type (`adr`, `runbook`), domain (`payments`, `infra`), lifecycle (`draft`, `approved`).
 7. **Link, don't duplicate** — Use `{include:Page Title}` or `[Link Text](Page Title)` for cross-references.
 
+## Writing Standards
+
+The Design Philosophy above governs visual structure. These standards govern the prose itself. Every page this skill produces should feel exact, practical, and mature.
+
+**Voice and language.** Use active voice, direct verbs, and concrete nouns. Prefer short-to-medium sentences. Cut filler, hype, generic praise, marketing tone, and AI-sounding phrasing ("it's important to note", "leveraging", "in order to"). If a sentence adds no information, delete it.
+
+**Structure.** State the main point in the first sentence of each section — don't build up to it. Define terms before relying on them. Each paragraph should do one job.
+
+**Precision.** Separate fact, assumption, interpretation, and recommendation — don't blend them. Make trade-offs and risks explicit; never hide downsides. When quantifying, use specific numbers over vague qualifiers ("P99 < 200ms" not "fast").
+
+**Technical distinctions.** For technical content, consistently distinguish:
+- Requirement vs. recommendation
+- Architecture vs. implementation
+- Current state vs. target state
+- Symptom vs. root cause
+
+**Procedures.** Steps must be ordered, observable, and actionable. Each step should produce a visible result the reader can verify before moving to the next. Include expected output where relevant.
+
+**Revision.** Before finalizing, revise for clarity, precision, structure, compression, and usefulness. Remove anything the reader doesn't need.
+
 ## Quick Publishing Workflow
 
 ```bash
