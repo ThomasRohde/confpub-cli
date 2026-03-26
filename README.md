@@ -78,8 +78,10 @@ confpub plan apply --plan confpub-plan.json --dry-run
 - **Structured JSON output** — every command returns the same envelope shape on stdout
 - **Transactional workflow** — plan → validate → apply → verify with fingerprint-based conflict detection
 - **Markdown → Confluence** — code blocks become code macros, `> [!NOTE]` becomes Info panels, tables stay tables, task lists, math, definition lists, footnotes, panels, expand/collapse, page layouts, and `{macro}` syntax for Status, TOC, Jira, Anchor, Children, and more
-- **Asset handling** — images are uploaded as attachments and URLs are rewritten automatically
+- **Asset handling** — images are uploaded as attachments and URLs are rewritten automatically; JS/CSS files in `::: html` blocks are auto-discovered and uploaded
 - **Idempotent** — a lockfile tracks page IDs so re-publishing updates in place
+- **Full page lifecycle** — publish, pull, move, delete, export (PDF/Word), version history, labels, comments, and page properties
+- **Installable skill** — `confpub skill install` drops a publishing skill into Claude Code, GitHub Copilot, Cursor, Windsurf, or AGENTS.md — with 14 document templates and full syntax references
 - **Agent-ready** — `confpub guide` returns the full CLI schema; `LLM=true` suppresses interactive behavior
 - **Cloud + Server** — works with Confluence Cloud (*.atlassian.net) and Server/Data Center
 
@@ -93,18 +95,45 @@ All commands follow a `noun verb` pattern. Verbs telegraph mutation intent.
 |---------|---------|-------------|
 | `confpub guide` | No | Machine-readable CLI schema |
 | `confpub search` | No | Search Confluence content using CQL |
+| **Page** | | |
 | `confpub page list` | No | List pages in a space |
 | `confpub page inspect` | No | Detailed view of one page |
 | `confpub page publish` | **Yes** | Publish a single Markdown file |
 | `confpub page pull` | No | Pull Confluence pages to local Markdown |
 | `confpub page delete` | **Yes** | Delete a page (supports `--cascade`) |
+| `confpub page move` | **Yes** | Move a page under a new parent |
+| `confpub page history` | No | Show version history of a page |
+| `confpub page version` | No | Get a specific page version |
+| `confpub page export` | No | Export a page as PDF or Word |
+| **Space** | | |
 | `confpub space list` | No | List accessible spaces |
+| `confpub space inspect` | No | Detailed view of one space |
+| **Attachment** | | |
 | `confpub attachment list` | No | List attachments on a page |
 | `confpub attachment upload` | **Yes** | Upload a file as an attachment |
+| `confpub attachment download` | No | Download an attachment |
+| `confpub attachment delete` | **Yes** | Delete an attachment |
+| **Label** | | |
+| `confpub label list` | No | List labels on a page |
+| `confpub label add` | **Yes** | Add labels to a page |
+| `confpub label remove` | **Yes** | Remove labels from a page |
+| **Comment** | | |
+| `confpub comment list` | No | List comments on a page |
+| `confpub comment add` | **Yes** | Add a comment to a page |
+| **Property** | | |
+| `confpub property list` | No | List all properties on a page |
+| `confpub property get` | No | Get a single page property |
+| `confpub property set` | **Yes** | Set a page property (create or update) |
+| `confpub property delete` | **Yes** | Delete a page property |
+| **Plan** | | |
 | `confpub plan create` | No | Generate a plan artifact from a manifest |
 | `confpub plan validate` | No | Check a plan against current state |
 | `confpub plan apply` | **Yes** | Execute a plan (supports `--dry-run`) |
 | `confpub plan verify` | No | Assert post-conditions hold |
+| **Skill** | | |
+| `confpub skill install` | **Yes** | Install confpub skill into coding agents |
+| `confpub skill inspect` | No | Detect agents and show skill status |
+| **Config / Auth** | | |
 | `confpub auth inspect` | No | Show credential status |
 | `confpub config set` | **Yes** | Write a config value |
 | `confpub config inspect` | No | Show current config |
@@ -240,6 +269,8 @@ ERR_VALIDATION_MARKDOWN          Unparseable Markdown
 ERR_VALIDATION_ASSET_MISSING     Referenced image not found on disk
 ERR_VALIDATION_NOT_FOUND         Page or resource not found
 ERR_VALIDATION_SPACE_MISMATCH    Space key mismatch between manifest and target
+ERR_VALIDATION_LABEL             Invalid label format
+ERR_VALIDATION_SPACE_KEY         Space key looks like expanded shell path
 
 ERR_AUTH_REQUIRED                No credentials configured
 ERR_AUTH_EXPIRED                 Token has expired
@@ -462,6 +493,50 @@ confpub guide --section commands       # Just commands
 | `CONFPUB_TOKEN` | API token |
 | `CONFPUB_USER` | Email / username |
 | `CONFPUB_URL` | Confluence base URL |
+| `CONFPUB_SPACE` | Default space key |
+| `CONFPUB_SSL_VERIFY` | SSL verification (`true`/`false` or CA bundle path) |
+
+---
+
+## Skills
+
+confpub ships an installable skill that teaches coding agents how to write professional Confluence pages — including extended syntax, design principles, and 14 ready-to-use document templates.
+
+### Installing the skill
+
+```bash
+# Auto-detect agents in the current repo and install
+confpub skill install
+
+# Install for specific agents
+confpub skill install --agent claude --agent copilot
+
+# Preview without writing files
+confpub skill install --dry-run
+
+# Check which agents are detected
+confpub skill inspect
+```
+
+### Supported agents
+
+| Agent | Detection |
+|-------|-----------|
+| Claude Code | `.claude/` directory or `CLAUDE.md` |
+| GitHub Copilot | `.github/copilot-instructions.md` |
+| Cursor | `.cursor/rules/` or `.cursorrules` |
+| Windsurf | `.windsurfrules` or `.windsurf/` |
+| AGENTS.md | `AGENTS.md` in repo root |
+
+### What the skill includes
+
+The skill installs a main `SKILL.md` with a syntax cheat sheet and design philosophy, plus a `references/` directory with detailed guides and document templates:
+
+**Syntax and design references** — containers (panels, expand, admonitions, excerpts), macros (status, TOC, children, Jira, anchors, includes), formatting (code blocks, math, footnotes, tasks), HTML macro, layouts, design principles, design styling, page management, and publishing workflow.
+
+**Document templates** — ADR, API docs, change request, design doc, meeting notes, onboarding guide, post-mortem, RAID log, release notes, retrospective, RFC, runbook, service catalog, and sprint status.
+
+Once installed, agents can create polished Confluence pages that use the full range of confpub's extended Markdown syntax — panels, status lozenges, layouts, macros, and more — without the user needing to explain the syntax.
 
 ---
 
@@ -506,7 +581,9 @@ confpub/
 ├── reverse_converter.py  # Confluence Storage Format → Markdown
 ├── manifest.py           # Manifest + plan artifact models
 ├── lockfile.py           # confpub.lock persistence
+├── front_matter.py       # YAML front-matter parsing
 ├── html_macro_plugin.py  # ::: html block parser plugin
+├── macro_plugin.py       # {macro} inline syntax parser
 ├── assets.py             # Asset discovery, upload, URL rewriting
 ├── planner.py            # plan.create
 ├── validator.py          # plan.validate
@@ -514,7 +591,9 @@ confpub/
 ├── verifier.py           # plan.verify
 ├── publish.py            # page.publish shortcut
 ├── puller.py             # page.pull workflow
-└── guide.py              # Machine-readable CLI schema
+├── guide.py              # Machine-readable CLI schema
+├── skill_installer.py    # Skill installation logic
+└── skill_data/           # Skill content (SKILL.md + references/)
 ```
 
 ### Technology Stack
