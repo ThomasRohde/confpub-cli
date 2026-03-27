@@ -130,11 +130,12 @@ When the user wants professional-looking pages, dashboards, or custom styling:
 
 ### Trust Scoring
 
-When the user asks about trust, page quality, or when you need to evaluate Confluence sources. **Also read this when using Confluence as a source for answering questions** — trust scores tell you which pages to rely on.
+When the user asks about trust, page quality, optimizing pages, or when you need to evaluate Confluence sources. **Also read this when using Confluence as a source for answering questions** — trust scores tell you which pages to rely on.
 
 | User Intent | Read |
 |-------------|------|
 | Trust scoring, page quality, source reliability, trust anchors, governance metadata, scoring profiles, cache, TUI browser | `references/trust-scoring.md` |
+| "Optimize this page for trust", "improve the score", "fix governance gaps", "make this page trustworthy" | `references/trust-scoring.md` |
 
 ### Page Management & API
 

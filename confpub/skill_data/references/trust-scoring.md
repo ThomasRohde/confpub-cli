@@ -222,6 +222,49 @@ confpub page inspect --page-id 123456 --format markdown
 # 4. Cite trust levels when presenting answers
 ```
 
+## Agent Workflow: Optimizing a Page for Trust
+
+When the user says "optimize this page for trust" or "improve the score", follow this workflow:
+
+```bash
+# 1. Score the page with full signal breakdown
+confpub page score --page-id 123456 --explain full
+```
+
+Read every negative signal and fix what you can:
+
+| Negative Signal | How to Fix |
+|-----------------|------------|
+| `owner.present` = no | Set `confpub.meta.v1` with `owner_account_id` |
+| `multi_editor` = 1 | Cannot fix directly — note as a recommendation to the user |
+| `version.maturity` = 1 | The page needs more edits over time — not fixable in one pass |
+| `edit.quality` = 0 | Use meaningful version messages when publishing |
+| `review.metadata` = no | Set `reviewed_at` and `review_interval_days` in `confpub.meta.v1` |
+| `approvers.present` = 0 | Set `approvers` list in `confpub.meta.v1` |
+| `source_of_record.present` = no | Set `source_of_record` in `confpub.meta.v1` |
+| `freshness.decay` low | The page is old — update content or set a recent `reviewed_at` |
+| `outbound_links` = 0 | Add links to related pages, external docs, or source code |
+| `internal_links` = 0 | Add Confluence page links with `[text](Page Title)` |
+| `jira_refs` = 0 | Add Jira references with `{jira:PROJ-123}` macros |
+| `external_links` = 0 | Add links to external documentation, repos, or standards |
+| `authoritative_source` = 0 | Set `authoritative_sources` in `confpub.meta.v1` |
+| `tables_or_images` = none | Add tables for structured data, diagrams for architecture |
+| `has_excerpt` = no | Add an excerpt block or ensure the first paragraph is substantial |
+| `has_headings` = 0 | Add section headings (`## Overview`, `## Details`, etc.) |
+| `has_labels` = 0 | Add labels: `confpub label add --page-id 123456 --label governance --label engineering` |
+| `sane_length` low | Expand thin content — stubs score poorly |
+| `no_placeholder` negative | Remove TODO, TBD, FIXME, "coming soon" text |
+| `no_empty_sections` negative | Fill in empty sections or remove the heading |
+
+After fixing, re-score:
+
+```bash
+# 2. Re-score to verify improvement
+confpub page score --page-id 123456 --refresh --explain full
+```
+
+The most impactful fixes are usually: add headings + labels + links (structure/evidence), remove placeholders (structure), and set `confpub.meta.v1` with owner and review date (stewardship).
+
 ## Missing Signals
 
 The scorer never silently treats unavailable signals as zeros. When signals are missing (e.g., analytics unavailable), the scorer renormalizes weights, lowers confidence, and continues. Use `--include-missing` to see details.
