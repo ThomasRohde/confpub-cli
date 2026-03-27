@@ -86,8 +86,10 @@ skill_app = typer.Typer(help="Skill management", callback=_group_callback)
 trust_app = typer.Typer(help="Trust scoring administration", callback=_group_callback)
 trust_cache_app = typer.Typer(help="Trust cache operations", callback=_group_callback)
 trust_profile_app = typer.Typer(help="Trust profile operations", callback=_group_callback)
+trust_anchor_app = typer.Typer(help="Trust anchor operations", callback=_group_callback)
 trust_app.add_typer(trust_cache_app, name="cache")
 trust_app.add_typer(trust_profile_app, name="profile")
+trust_app.add_typer(trust_anchor_app, name="anchor")
 
 # ---------------------------------------------------------------------------
 # Main app
@@ -1199,12 +1201,11 @@ def page_score(
     space: Optional[str] = typer.Option(None, "--space", help="Space key (or CONFPUB_SPACE)"),
     title: Optional[str] = typer.Option(None, "--title", help="Page title (with --space)"),
     profile: Optional[str] = typer.Option(None, "--profile", help="Scoring profile override"),
-    doc_class: Optional[str] = typer.Option(None, "--doc-class", help="Document class override"),
+    doc_class: Optional[str] = typer.Option(None, "--doc-class", help="Primary class or legacy alias (governance, instruction, decision, reference, ...)"),
     explain: str = typer.Option("none", "--explain", help="Explanation verbosity: none|summary|full"),
     refresh: bool = typer.Option(False, "--refresh", help="Bypass cache, recompute from live data"),
     include_signals: bool = typer.Option(False, "--include-signals", help="Include signal breakdown"),
     include_missing: bool = typer.Option(False, "--include-missing", help="Include missing signal details"),
-    window: Optional[str] = typer.Option(None, "--window", help="Analytics time window (e.g. 90d)"),
 ) -> None:
     """Score a page for operational trustworthiness."""
     space = _resolve_space(space)
@@ -1215,9 +1216,17 @@ def page_score(
                 "ERR_VALIDATION_REQUIRED",
                 "Either --page-id or both --space and --title are required",
             )
-        # --explain full implies both include flags
+        # Validate --explain
+        valid_explain = ("none", "summary", "full")
+        if explain not in valid_explain:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                f"--explain must be one of: {', '.join(valid_explain)} (got '{explain}')",
+            )
         if explain == "full":
             include_signals = True
+            include_missing = True
+        elif explain == "summary":
             include_missing = True
 
         from confpub.confluence import build_client
@@ -1235,9 +1244,16 @@ def page_score(
             include_signals=include_signals,
             include_missing=include_missing,
             refresh=refresh,
-            window=window,
         )
         ctx.result = result.model_dump(mode="json", exclude_none=True)
+
+
+@trust_app.command("browse")
+def trust_browse() -> None:
+    """Browse cached trust scores interactively."""
+    from confpub.trust.tui import TrustBrowserApp
+    app = TrustBrowserApp()
+    app.run()
 
 
 @trust_cache_app.command("inspect")
@@ -1262,6 +1278,16 @@ def trust_cache_purge(
 ) -> None:
     """Clear trust cache entries."""
     with command_context("trust.cache.purge") as ctx:
+        if not any([space, page_id, older_than is not None, all_entries]):
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "At least one filter is required: --all, --space, --page-id, or --older-than",
+            )
+        if older_than is not None and older_than < 0:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                f"--older-than must be non-negative (got {older_than})",
+            )
         from confpub.trust.cache import open_cache
 
         cache = open_cache()
@@ -1293,6 +1319,100 @@ def trust_profile_inspect(
                 "profiles": {k: v.model_dump(mode="json") for k, v in profiles.items()},
                 "default": "official-knowledge",
             }
+
+
+@trust_anchor_app.command("set")
+def trust_anchor_set(
+    space: Optional[str] = typer.Option(None, "--space", help="Space key to anchor"),
+    page_id: Optional[str] = typer.Option(None, "--page-id", help="Page ID to anchor"),
+    level: str = typer.Option(..., "--level", help="Trust level: high, good, caution, low, exclude"),
+    reason: str = typer.Option("", "--reason", help="Why this anchor exists"),
+) -> None:
+    """Declare a trust level for a space or page."""
+    with command_context("trust.anchor.set", target={"space": space, "page_id": page_id}) as ctx:
+        if not space and not page_id:
+            raise ConfpubError("ERR_VALIDATION_REQUIRED", "Either --space or --page-id is required")
+        from confpub.trust.anchors import TRUST_LEVELS, TrustAnchor, load_anchors, save_anchors
+        if level not in TRUST_LEVELS:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                f"Invalid trust level '{level}'. Valid: {', '.join(TRUST_LEVELS)}",
+            )
+        anchors = load_anchors()
+        anchor = TrustAnchor(level=level, reason=reason)
+        if space:
+            anchors.spaces[space] = anchor
+        if page_id:
+            anchors.pages[page_id] = anchor
+        path = save_anchors(anchors)
+        # Invalidate affected cache entries so stale anchor data doesn't persist
+        try:
+            from confpub.trust.cache import TrustCache
+            cache = TrustCache()
+            if page_id:
+                cache.purge(page_id=page_id)
+            elif space:
+                cache.purge(space=space)
+            cache.close()
+        except Exception:
+            pass
+        ctx.result = {
+            "anchor": anchor.model_dump(),
+            "target": {"space": space, "page_id": page_id},
+            "file": str(path),
+            "level_description": TRUST_LEVELS[level]["description"],
+        }
+
+
+@trust_anchor_app.command("list")
+def trust_anchor_list() -> None:
+    """List all declared trust anchors."""
+    with command_context("trust.anchor.list") as ctx:
+        from confpub.trust.anchors import TRUST_LEVELS, load_anchors
+        anchors = load_anchors()
+        spaces = {k: {**v.model_dump(), "description": TRUST_LEVELS.get(v.level, {}).get("description", "")}
+                  for k, v in anchors.spaces.items()}
+        pages = {k: {**v.model_dump(), "description": TRUST_LEVELS.get(v.level, {}).get("description", "")}
+                 for k, v in anchors.pages.items()}
+        ctx.result = {
+            "spaces": spaces,
+            "pages": pages,
+            "total": len(anchors.spaces) + len(anchors.pages),
+        }
+
+
+@trust_anchor_app.command("remove")
+def trust_anchor_remove(
+    space: Optional[str] = typer.Option(None, "--space", help="Space key to remove"),
+    page_id: Optional[str] = typer.Option(None, "--page-id", help="Page ID to remove"),
+) -> None:
+    """Remove a trust anchor."""
+    with command_context("trust.anchor.remove", target={"space": space, "page_id": page_id}) as ctx:
+        if not space and not page_id:
+            raise ConfpubError("ERR_VALIDATION_REQUIRED", "Either --space or --page-id is required")
+        from confpub.trust.anchors import load_anchors, save_anchors
+        anchors = load_anchors()
+        removed = False
+        if space and space in anchors.spaces:
+            del anchors.spaces[space]
+            removed = True
+        if page_id and page_id in anchors.pages:
+            del anchors.pages[page_id]
+            removed = True
+        if removed:
+            save_anchors(anchors)
+            # Invalidate affected cache entries
+            try:
+                from confpub.trust.cache import TrustCache
+                cache = TrustCache()
+                if page_id:
+                    cache.purge(page_id=page_id)
+                elif space:
+                    cache.purge(space=space)
+                cache.close()
+            except Exception:
+                pass
+        ctx.result = {"removed": removed}
 
 
 # ---------------------------------------------------------------------------

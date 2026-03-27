@@ -440,7 +440,6 @@ def build_guide() -> dict[str, Any]:
                     "--profile", "--doc-class",
                     "--explain", "--refresh",
                     "--include-signals", "--include-missing",
-                    "--window",
                 ],
                 "agent_hint": (
                     "Scores governance, freshness, evidence, structure, and corroboration. "

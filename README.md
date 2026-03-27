@@ -81,6 +81,10 @@ confpub plan apply --plan confpub-plan.json --dry-run
 - **Asset handling** — images are uploaded as attachments and URLs are rewritten automatically; JS/CSS files in `::: html` blocks are auto-discovered and uploaded
 - **Idempotent** — a lockfile tracks page IDs so re-publishing updates in place
 - **Full page lifecycle** — publish, pull, move, delete, export (PDF/Word), version history, labels, comments, and page properties
+- **Trust scoring** — every page gets a 0–100 trust score based on governance, freshness, evidence, and structure signals — fully automatic from native Confluence data, no metadata setup required
+- **Trust-aware search** — search results include trust scores and plain-language advisories ("trustworthy", "verify before using", "do not trust") so agents can prefer reliable sources
+- **Trust anchors** — declare which spaces and pages you trust; your insider knowledge persists across conversations and boosts or caps scores automatically
+- **Interactive TUI** — `confpub trust browse` opens a Textual-based browser for cached trust scores with sortable tables, detail drilldown, and live re-scoring
 - **Installable skill** — `confpub skill install` drops a publishing skill into Claude Code, GitHub Copilot, Cursor, Windsurf, or AGENTS.md — with 14 document templates and full syntax references
 - **Agent-ready** — `confpub guide` returns the full CLI schema; `LLM=true` suppresses interactive behavior
 - **Cloud + Server** — works with Confluence Cloud (*.atlassian.net) and Server/Data Center
@@ -133,6 +137,15 @@ All commands follow a `noun verb` pattern. Verbs telegraph mutation intent.
 | **Skill** | | |
 | `confpub skill install` | **Yes** | Install confpub skill into coding agents |
 | `confpub skill inspect` | No | Detect agents and show skill status |
+| **Trust** | | |
+| `confpub page score` | No | Score a page for trustworthiness |
+| `confpub trust browse` | No | Interactive TUI browser for cached scores |
+| `confpub trust anchor set` | **Yes** | Declare a trust level for a space or page |
+| `confpub trust anchor list` | No | List all trust anchors |
+| `confpub trust anchor remove` | **Yes** | Remove a trust anchor |
+| `confpub trust cache inspect` | No | Show cache statistics |
+| `confpub trust cache purge` | **Yes** | Clear cached scores |
+| `confpub trust profile inspect` | No | Show scoring profiles |
 | **Config / Auth** | | |
 | `confpub auth inspect` | No | Show credential status |
 | `confpub config set` | **Yes** | Write a config value |
@@ -245,6 +258,76 @@ confpub search --space DEV --cql 'title ~ "deploy"'
 
 ---
 
+## Trust Scoring
+
+Every Confluence page gets a 0–100 trust score estimating how safe it is to rely on as current guidance. Scoring works fully automatically from native Confluence signals — no metadata setup required.
+
+```bash
+# Score a page
+confpub page score --page-id 123456
+
+# Scores appear in search results automatically
+confpub search --space EA --type page --title "architecture"
+# → each result includes: trust.score, trust.band, trust.advisory.verdict
+```
+
+### How it works
+
+The score combines five subscores:
+
+| Subscore | What it measures (from native Confluence data) |
+|----------|------------------------------------------------|
+| **Stewardship** (0.30) | Multiple editors, version maturity, edit quality |
+| **Freshness** (0.25) | Page age vs class-specific half-life |
+| **Evidence** (0.20) | Outbound links, Jira macros, tables, images |
+| **Structure** (0.15) | Headings, body length, labels, no placeholders |
+| **Corroboration** (0.10) | Views, watchers (future) |
+
+Hard caps prevent bad pages from scoring well: archived pages cap at 10, personal spaces at 50, deprecated content at 25.
+
+Pages you interact with are scored automatically — `page inspect`, `page publish`, `label add`, and other commands warm the cache as a silent side effect.
+
+### Trust anchors
+
+Encode your insider knowledge about which spaces are authoritative:
+
+```bash
+confpub trust anchor set --space EA --level high --reason "Architecture team"
+confpub trust anchor set --space DOCS --level good --reason "Official docs"
+confpub trust anchor set --space '~thomas' --level low --reason "Personal drafts"
+```
+
+Anchors persist in `~/.confpub/trust-anchors.json` and apply to every score. An agent using confpub will automatically prefer pages from high-trust spaces.
+
+### Trust-aware agent workflow
+
+When an agent searches Confluence to answer a question, each result includes a trust advisory:
+
+```json
+{
+  "title": "Deployment Guide",
+  "trust": {
+    "score": 88,
+    "advisory": {
+      "verdict": "trustworthy",
+      "guidance": "Safe to rely on as current guidance."
+    }
+  }
+}
+```
+
+The agent can prefer high-trust sources and warn when only low-trust content is available.
+
+### Interactive browser
+
+```bash
+confpub trust browse
+```
+
+Opens a Textual TUI showing all cached scores in a sortable table. Press Enter to drill into subscores and signals, `r` to re-score a page, `s` to sort.
+
+---
+
 ## Exit Codes
 
 | Code | Meaning | Action |
@@ -288,6 +371,11 @@ ERR_IO_TIMEOUT                   Request timed out
 ERR_INTERNAL_CONVERTER           Markdown → Confluence conversion crashed
 ERR_INTERNAL_REVERSE_CONVERTER   Confluence → Markdown conversion crashed
 ERR_INTERNAL_SDK                 Unexpected API response
+
+ERR_VALIDATION_TRUST_PROFILE     Unknown scoring profile
+ERR_VALIDATION_TRUST_DOC_CLASS   Unknown document class
+ERR_IO_TRUST_METADATA            Core page metadata unavailable
+ERR_INTERNAL_TRUST_CACHE         Trust cache corrupted
 ```
 
 ---
@@ -593,7 +681,15 @@ confpub/
 ├── puller.py             # page.pull workflow
 ├── guide.py              # Machine-readable CLI schema
 ├── skill_installer.py    # Skill installation logic
-└── skill_data/           # Skill content (SKILL.md + references/)
+├── skill_data/           # Skill content (SKILL.md + references/)
+└── trust/                # Trust scoring engine
+    ├── models.py         # Classification taxonomy, score models
+    ├── profiles.py       # Built-in scoring profiles
+    ├── scoring.py        # Signal collection, subscores, hard caps
+    ├── body_parser.py    # HTML body analysis (BeautifulSoup4)
+    ├── cache.py          # SQLite cache (~/.confpub/)
+    ├── anchors.py        # User-declared trust levels
+    └── tui.py            # Textual interactive browser
 ```
 
 ### Technology Stack
@@ -607,6 +703,8 @@ confpub/
 | Validation | [Pydantic v2](https://docs.pydantic.dev) |
 | JSON serialization | [orjson](https://github.com/ijl/orjson) |
 | Credentials | [keyring](https://github.com/jaraco/keyring) + env vars |
+| Trust cache | SQLite (stdlib) |
+| TUI | [Textual](https://github.com/Textualize/textual) |
 
 ---
 

@@ -40,6 +40,7 @@ dependencies = [
     "pyyaml>=6.0",
     "markdownify>=0.14",
     "beautifulsoup4>=4.12",
+    "textual>=0.80",
 ]
 
 [project.urls]

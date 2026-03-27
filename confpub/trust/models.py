@@ -74,6 +74,34 @@ BANDS: list[tuple[str, int, int]] = [
     ("low", 0, 49),
 ]
 
+# Agent-facing trust advisories keyed by (band, low_confidence)
+ADVISORIES: dict[str, dict[str, str]] = {
+    "high": {
+        "verdict": "trustworthy",
+        "guidance": "Safe to rely on as current guidance. Content is governed, current, and well-evidenced.",
+    },
+    "high_low_conf": {
+        "verdict": "probably trustworthy",
+        "guidance": "Likely reliable but some signals are missing. Verify critical claims independently.",
+    },
+    "good": {
+        "verdict": "usable",
+        "guidance": "Reasonable to use but may have minor governance gaps. Check freshness and ownership before acting on it.",
+    },
+    "good_low_conf": {
+        "verdict": "usable with caution",
+        "guidance": "Appears usable but confidence is low — key signals are missing. Cross-reference with other sources.",
+    },
+    "caution": {
+        "verdict": "verify before using",
+        "guidance": "Governance gaps detected. Do not treat as authoritative without independent verification. Check when it was last reviewed and by whom.",
+    },
+    "low": {
+        "verdict": "do not trust",
+        "guidance": "Significant governance, freshness, or evidence problems. Treat as potentially outdated or abandoned. Look for a more authoritative source.",
+    },
+}
+
 DEFAULT_WEIGHTS: dict[str, float] = {
     "stewardship": 0.30,
     "freshness": 0.25,
@@ -89,6 +117,16 @@ def band_for_score(score: int) -> str:
         if lo <= score <= hi:
             return name
     return "low"
+
+
+def advisory_for(band: str, confidence: float) -> dict[str, str]:
+    """Return agent-facing trust advisory for a band + confidence level."""
+    low_conf = confidence < 0.70
+    if low_conf and band in ("high", "good"):
+        key = f"{band}_low_conf"
+    else:
+        key = band
+    return dict(ADVISORIES.get(key, ADVISORIES["low"]))
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +268,8 @@ class PageScoreResult(BaseModel):
     score: int
     band: str
     confidence: float
+    advisory: dict[str, str] | None = None
+    anchor: dict[str, Any] | None = None
     hard_caps: list[dict[str, Any]] = Field(default_factory=list)
     subscores: dict[str, float]
     signals: list[dict[str, Any]] | None = None

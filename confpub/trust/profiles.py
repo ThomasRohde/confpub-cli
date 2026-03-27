@@ -36,6 +36,7 @@ _ALL_HARD_CAPS: list[HardCapConfig] = [
     HardCapConfig(name="lifecycle_deprecated", cap=0.25),
     HardCapConfig(name="scaffold_class", cap=0.35),
     HardCapConfig(name="no_owner_90d", cap=0.45),
+    HardCapConfig(name="personal_space", cap=0.50),
 ]
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,7 @@ _WORKING_AREA = ProfileConfig(
         HardCapConfig(name="lifecycle_deprecated", cap=0.35),
         HardCapConfig(name="scaffold_class", cap=0.50),
         HardCapConfig(name="no_owner_90d", cap=0.55),
+        HardCapConfig(name="personal_space", cap=0.65),
     ],
     anti_signal_patterns=list(_DEFAULT_ANTI_SIGNALS),
     title_cap_pattern=r"(?i)^(copy of|draft|tmp|test)\b",
@@ -118,6 +120,7 @@ _HISTORICAL_RECORD = ProfileConfig(
         HardCapConfig(name="lifecycle_deprecated", cap=0.35),
         HardCapConfig(name="scaffold_class", cap=0.40),
         HardCapConfig(name="no_owner_90d", cap=0.55),
+        HardCapConfig(name="personal_space", cap=0.60),
     ],
     anti_signal_patterns=list(_DEFAULT_ANTI_SIGNALS),
     title_cap_pattern=r"(?i)^(copy of|draft|tmp|test)\b",

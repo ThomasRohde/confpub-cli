@@ -1,6 +1,6 @@
 ---
 name: confpub-publishing
-description: Create and publish professional Confluence pages using the confpub CLI. Use this skill whenever the user wants to create, write, publish, update, or manage Confluence documentation — including architecture decision records (ADRs), technical designs, runbooks, project dashboards, sprint status pages, meeting notes, retrospectives, RFCs, incident post-mortems, or any enterprise documentation. Also triggers when the user mentions confpub, Confluence publishing, "publish to Confluence", "create a Confluence page", documentation-as-code workflows, or wants to convert Markdown to Confluence storage format. Even if the user doesn't mention confpub by name but asks to "publish docs", "update the wiki", or "create documentation", this skill applies when confpub is installed in the project.
+description: Create, publish, and manage Confluence pages and their trustworthiness using the confpub CLI. Use this skill whenever the user wants to create, write, publish, update, or manage Confluence documentation — including architecture decision records (ADRs), technical designs, runbooks, project dashboards, sprint status pages, meeting notes, retrospectives, RFCs, incident post-mortems, or any enterprise documentation. Also triggers when the user mentions confpub, Confluence publishing, "publish to Confluence", "create a Confluence page", documentation-as-code workflows, or wants to convert Markdown to Confluence storage format. Also triggers for trust scoring, page quality, content reliability, trust anchors — when the user says things like "I trust this space", "is this page reliable", "score this page", "which sources should I trust", "set trust level", or asks about Confluence content trustworthiness. Also triggers when the user asks a question that requires searching Confluence for authoritative internal sources — the trust system helps select the most reliable pages. Even if the user doesn't mention confpub by name but asks to "publish docs", "update the wiki", "create documentation", or discusses trusting Confluence content, this skill applies when confpub is installed in the project.
 ---
 
 # Confluence Publishing with confpub
@@ -130,11 +130,11 @@ When the user wants professional-looking pages, dashboards, or custom styling:
 
 ### Trust Scoring
 
-When the user asks about page or space trustworthiness, governance audits, or content quality assessment:
+When the user asks about trust, page quality, or when you need to evaluate Confluence sources. **Also read this when using Confluence as a source for answering questions** — trust scores tell you which pages to rely on.
 
 | User Intent | Read |
 |-------------|------|
-| Trust scoring, page quality, space audits, governance metadata, scoring profiles, cache management | `references/trust-scoring.md` |
+| Trust scoring, page quality, source reliability, trust anchors, governance metadata, scoring profiles, cache, TUI browser | `references/trust-scoring.md` |
 
 ### Page Management & API
 

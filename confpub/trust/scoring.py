@@ -31,6 +31,7 @@ from confpub.trust.models import (
     RawPageData,
     ResolvedClassification,
     Signal,
+    advisory_for,
     band_for_score,
 )
 from confpub.trust.profiles import resolve_profile
@@ -356,13 +357,14 @@ def _collect_raw_data(
 # ---------------------------------------------------------------------------
 
 _STEWARDSHIP_SIGNALS = {
-    "owner.present": 0.22,
-    "review.metadata": 0.22,
-    "approvers.present": 0.12,
-    "content_state.final": 0.10,  # missing in Phase 1
-    "version.maturity": 0.12,
-    "edit.quality": 0.10,
-    "source_of_record.present": 0.12,
+    "owner.present": 0.18,
+    "multi_editor": 0.16,
+    "version.maturity": 0.16,
+    "edit.quality": 0.12,
+    "review.metadata": 0.14,
+    "approvers.present": 0.08,
+    "source_of_record.present": 0.08,
+    "content_state.final": 0.08,  # missing in Phase 1
 }
 
 
@@ -372,11 +374,10 @@ def _compute_stewardship(
 ) -> tuple[float, list[Signal]]:
     signals: list[Signal] = []
 
-    # Owner present
+    # Owner present — infer from history if no explicit owner
     owner_id = meta.owner_account_id if meta else None
     inferred = False
     if not owner_id and raw.history:
-        # Infer from earliest version author
         earliest = raw.history[-1] if raw.history else None
         if earliest:
             owner_id = earliest.get("by", "")
@@ -391,7 +392,41 @@ def _compute_stewardship(
         inferred=inferred,
     ))
 
-    # Review metadata
+    # Multi-editor: distinct editors in history (native Confluence signal)
+    editors = {h.get("by", "") for h in raw.history if h.get("by")}
+    editor_count = len(editors)
+    multi_score = 1.0 if editor_count >= 3 else (0.5 if editor_count == 2 else 0.0)
+    signals.append(Signal(
+        id="multi_editor",
+        status="positive" if editor_count >= 3 else ("neutral" if editor_count == 2 else "negative"),
+        weight=_STEWARDSHIP_SIGNALS["multi_editor"],
+        value=editor_count,
+        source="page.history.distinct_editors",
+    ))
+
+    # Version maturity
+    vn = raw.version_number
+    maturity_score = 1.0 if vn >= 5 else (0.75 if vn >= 3 else (0.5 if vn == 2 else 0.25))
+    signals.append(Signal(
+        id="version.maturity",
+        status="positive" if vn >= 3 else "neutral",
+        weight=_STEWARDSHIP_SIGNALS["version.maturity"],
+        value=vn,
+        source="page.version.number",
+    ))
+
+    # Non-trivial edit history (version messages)
+    substantive = sum(1 for h in raw.history if h.get("message", ""))
+    edit_score = 1.0 if substantive >= 2 else (0.5 if substantive == 1 else 0.0)
+    signals.append(Signal(
+        id="edit.quality",
+        status="positive" if substantive >= 2 else ("neutral" if substantive == 1 else "negative"),
+        weight=_STEWARDSHIP_SIGNALS["edit.quality"],
+        value=substantive,
+        source="page.history.messages",
+    ))
+
+    # Review metadata (meta-dependent, lower weight)
     has_reviewed_at = bool(meta and meta.reviewed_at)
     has_interval = bool(meta and meta.review_interval_days)
     review_score = 1.0 if (has_reviewed_at and has_interval) else (0.5 if (has_reviewed_at or has_interval) else 0.0)
@@ -403,7 +438,7 @@ def _compute_stewardship(
         source="confpub.meta.v1",
     ))
 
-    # Approvers
+    # Approvers (meta-dependent)
     has_approvers = bool(meta and meta.approvers)
     signals.append(Signal(
         id="approvers.present",
@@ -411,6 +446,16 @@ def _compute_stewardship(
         weight=_STEWARDSHIP_SIGNALS["approvers.present"],
         value=len(meta.approvers) if meta else 0,
         source="confpub.meta.v1.approvers",
+    ))
+
+    # Source of record (meta-dependent)
+    has_sor = bool(meta and meta.source_of_record)
+    signals.append(Signal(
+        id="source_of_record.present",
+        status="positive" if has_sor else "negative",
+        weight=_STEWARDSHIP_SIGNALS["source_of_record.present"],
+        value=has_sor,
+        source="confpub.meta.v1.source_of_record",
     ))
 
     # Content state — always missing in Phase 1
@@ -422,53 +467,23 @@ def _compute_stewardship(
         source="content_state_api",
     ))
 
-    # Version maturity
-    vn = raw.version_number
-    maturity_score = 1.0 if vn >= 3 else (0.5 if vn == 2 else 0.25)
-    signals.append(Signal(
-        id="version.maturity",
-        status="positive" if vn >= 3 else "neutral",
-        weight=_STEWARDSHIP_SIGNALS["version.maturity"],
-        value=vn,
-        source="page.version.number",
-    ))
-
-    # Non-trivial edit history
-    substantive = sum(1 for h in raw.history if h.get("message", ""))
-    edit_score = 1.0 if substantive >= 2 else (0.5 if substantive == 1 else 0.0)
-    signals.append(Signal(
-        id="edit.quality",
-        status="positive" if substantive >= 2 else ("neutral" if substantive == 1 else "negative"),
-        weight=_STEWARDSHIP_SIGNALS["edit.quality"],
-        value=substantive,
-        source="page.history.messages",
-    ))
-
-    # Source of record
-    has_sor = bool(meta and meta.source_of_record)
-    signals.append(Signal(
-        id="source_of_record.present",
-        status="positive" if has_sor else "negative",
-        weight=_STEWARDSHIP_SIGNALS["source_of_record.present"],
-        value=has_sor,
-        source="confpub.meta.v1.source_of_record",
-    ))
-
     # Compute subscore, redistributing missing content_state weight
     available = [s for s in signals if s.status != "missing"]
     total_available_weight = sum(s.weight for s in available)
 
     score = 0.0
     for s in available:
-        effective_weight = s.weight / total_available_weight if total_available_weight > 0 else 0.0
+        ew = s.weight / total_available_weight if total_available_weight > 0 else 0.0
         if s.id == "review.metadata":
-            score += effective_weight * review_score
+            score += ew * review_score
         elif s.id == "version.maturity":
-            score += effective_weight * maturity_score
+            score += ew * maturity_score
         elif s.id == "edit.quality":
-            score += effective_weight * edit_score
+            score += ew * edit_score
+        elif s.id == "multi_editor":
+            score += ew * multi_score
         elif s.status == "positive":
-            score += effective_weight * 1.0
+            score += ew * 1.0
 
     return score, signals
 
@@ -551,25 +566,74 @@ def _compute_freshness(
 # ---------------------------------------------------------------------------
 
 _EVIDENCE_SIGNALS = {
-    "authoritative_source": 0.30,
-    "multiple_source_types": 0.20,
-    "repo_or_sor": 0.20,
-    "jira_refs": 0.10,
-    "no_dead_links": 0.10,  # missing in Phase 1
-    "reference_density": 0.10,
+    "outbound_links": 0.20,
+    "internal_links": 0.15,
+    "jira_refs": 0.15,
+    "external_links": 0.10,
+    "authoritative_source": 0.15,
+    "repo_or_sor": 0.10,
+    "tables_or_images": 0.10,
+    "no_dead_links": 0.05,  # missing in Phase 1
 }
 
 
 def _compute_evidence(
     raw: RawPageData,
     meta: ConfpubMeta | None,
-    body_link_count: int,
+    body_features: "BodyFeatures",
 ) -> tuple[float, list[Signal]]:
+    from confpub.trust.body_parser import BodyFeatures
+
     signals: list[Signal] = []
     sources = meta.authoritative_sources if meta else []
-    source_types = {s.get("type", "") for s in sources} if sources else set()
 
-    # At least one authoritative source
+    # Outbound links (from body — works on any Confluence)
+    link_count = body_features.outbound_link_count
+    link_score = 1.0 if link_count >= 5 else (0.75 if link_count >= 3 else (0.4 if link_count >= 1 else 0.0))
+    signals.append(Signal(
+        id="outbound_links",
+        status="positive" if link_count >= 3 else ("neutral" if link_count >= 1 else "negative"),
+        weight=_EVIDENCE_SIGNALS["outbound_links"],
+        value=link_count,
+        source="body.links",
+    ))
+
+    # Internal page links (from body)
+    int_links = body_features.internal_link_count
+    int_score = 1.0 if int_links >= 3 else (0.5 if int_links >= 1 else 0.0)
+    signals.append(Signal(
+        id="internal_links",
+        status="positive" if int_links >= 3 else ("neutral" if int_links >= 1 else "negative"),
+        weight=_EVIDENCE_SIGNALS["internal_links"],
+        value=int_links,
+        source="body.internal_links",
+    ))
+
+    # Jira macros (from body — native Confluence macro, no metadata needed)
+    jira_count = body_features.jira_macro_count
+    # Also check meta sources for jira refs
+    meta_jira = any(s.get("type") == "jira" for s in sources)
+    has_jira = jira_count > 0 or meta_jira
+    signals.append(Signal(
+        id="jira_refs",
+        status="positive" if has_jira else "negative",
+        weight=_EVIDENCE_SIGNALS["jira_refs"],
+        value=jira_count,
+        source="body.jira_macros" if jira_count > 0 else "confpub.meta.v1",
+    ))
+
+    # External links (from body)
+    ext_links = body_features.external_link_count
+    ext_score = 1.0 if ext_links >= 2 else (0.5 if ext_links >= 1 else 0.0)
+    signals.append(Signal(
+        id="external_links",
+        status="positive" if ext_links >= 2 else ("neutral" if ext_links >= 1 else "negative"),
+        weight=_EVIDENCE_SIGNALS["external_links"],
+        value=ext_links,
+        source="body.external_links",
+    ))
+
+    # Authoritative sources (meta-dependent, lower weight now)
     has_source = len(sources) >= 1
     signals.append(Signal(
         id="authoritative_source",
@@ -579,19 +643,9 @@ def _compute_evidence(
         source="confpub.meta.v1.authoritative_sources",
     ))
 
-    # Multiple source types
-    multi = len(source_types) >= 2
-    signals.append(Signal(
-        id="multiple_source_types",
-        status="positive" if multi else "negative",
-        weight=_EVIDENCE_SIGNALS["multiple_source_types"],
-        value=sorted(source_types) if source_types else [],
-        source="confpub.meta.v1.authoritative_sources",
-    ))
-
-    # Repo or source-of-record
+    # Repo or source-of-record (meta-dependent)
     has_sor = bool(meta and meta.source_of_record)
-    has_repo = "repo" in source_types
+    has_repo = any(s.get("type") == "repo" for s in sources)
     signals.append(Signal(
         id="repo_or_sor",
         status="positive" if (has_sor or has_repo) else "negative",
@@ -600,14 +654,14 @@ def _compute_evidence(
         source="confpub.meta.v1",
     ))
 
-    # Jira/change refs
-    has_jira = "jira" in source_types
+    # Tables or images (from body — indicates structured evidence)
+    has_visual = body_features.table_count > 0 or body_features.image_count > 0
     signals.append(Signal(
-        id="jira_refs",
-        status="positive" if has_jira else "negative",
-        weight=_EVIDENCE_SIGNALS["jira_refs"],
-        value=has_jira,
-        source="confpub.meta.v1.authoritative_sources",
+        id="tables_or_images",
+        status="positive" if has_visual else "negative",
+        weight=_EVIDENCE_SIGNALS["tables_or_images"],
+        value={"tables": body_features.table_count, "images": body_features.image_count},
+        source="body.visual_content",
     ))
 
     # No dead links — missing in Phase 1
@@ -619,25 +673,19 @@ def _compute_evidence(
         source="link_check",
     ))
 
-    # Reference density
-    density_score = 1.0 if body_link_count >= 3 else (0.5 if body_link_count >= 1 else 0.0)
-    signals.append(Signal(
-        id="reference_density",
-        status="positive" if body_link_count >= 3 else ("neutral" if body_link_count >= 1 else "negative"),
-        weight=_EVIDENCE_SIGNALS["reference_density"],
-        value=body_link_count,
-        source="body.outbound_links",
-    ))
-
-    # Compute subscore, redistributing missing signal weight
+    # Compute subscore
     available = [s for s in signals if s.status != "missing"]
     total_w = sum(s.weight for s in available)
     score = 0.0
     if total_w > 0:
         for s in available:
             ew = s.weight / total_w
-            if s.id == "reference_density":
-                score += ew * density_score
+            if s.id == "outbound_links":
+                score += ew * link_score
+            elif s.id == "internal_links":
+                score += ew * int_score
+            elif s.id == "external_links":
+                score += ew * ext_score
             elif s.status == "positive":
                 score += ew * 1.0
 
@@ -860,6 +908,14 @@ def _evaluate_hard_caps(
             "reason": "Page is classified as scaffold (template/checklist/starter doc)",
         })
 
+    # Personal space (key starts with ~)
+    if "personal_space" in caps_by_name and raw.space_key.startswith("~"):
+        triggered.append({
+            "name": "personal_space",
+            "cap": caps_by_name["personal_space"].cap,
+            "reason": f"Page is in personal space '{raw.space_key}'",
+        })
+
     # No owner and age > 90 days
     if "no_owner_90d" in caps_by_name:
         has_owner = bool(meta and meta.owner_account_id)
@@ -988,7 +1044,6 @@ def score_page(
     include_signals: bool = False,
     include_missing: bool = False,
     refresh: bool = False,
-    window: str | None = None,
 ) -> PageScoreResult:
     """Score a single page for operational trustworthiness."""
     # 1. Collect raw data
@@ -1038,7 +1093,7 @@ def score_page(
     # 5. Compute subscores
     stew_score, stew_signals = _compute_stewardship(raw, raw.meta_property)
     fresh_score, fresh_signals = _compute_freshness(raw, raw.meta_property, profile, primary_class)
-    ev_score, ev_signals = _compute_evidence(raw, raw.meta_property, body_features.outbound_link_count)
+    ev_score, ev_signals = _compute_evidence(raw, raw.meta_property, body_features)
     struct_score, struct_signals = _compute_structure(raw, profile)
     corr_score, corr_signals = _compute_corroboration()
 
@@ -1067,22 +1122,33 @@ def score_page(
 
     # 9. Final score
     raw_score = round(100 * cap_multiplier * weighted_sum)
-    # Record class cap (meeting notes, action logs, etc.)
     if primary_class == "record":
         raw_score = min(raw_score, profile.record_score_cap)
     final_score = max(0, min(100, raw_score))
 
-    # 10. Band
+    # 10. Trust anchors (user-declared overrides)
+    anchor_info = None
+    try:
+        from confpub.trust.anchors import apply_anchor
+        final_score, anchor_info = apply_anchor(
+            final_score, raw.space_key, raw.page_id,
+            has_hard_caps=bool(triggered_caps),
+        )
+    except Exception:
+        pass
+
+    # 11. Band (after anchor adjustment)
     band = band_for_score(final_score)
 
-    # 11. Confidence
+    # 12. Confidence
     confidence = _compute_confidence(all_signals, profile.weights, missing_subscores)
 
-    # 12. Capabilities
+    # 13. Capabilities
     capabilities = Capabilities()
 
-    # 13. Build result
+    # 14. Build result
     now_iso = datetime.now(timezone.utc).isoformat()
+    advisory = advisory_for(band, confidence)
     result = PageScoreResult(
         algorithm_version=ALGORITHM_VERSION,
         profile=profile.name,
@@ -1092,21 +1158,21 @@ def score_page(
         score=final_score,
         band=band,
         confidence=confidence,
+        advisory=advisory,
+        anchor=anchor_info,
         hard_caps=triggered_caps,
         subscores=subscores,
         page_version=raw.version_number,
         scored_at=now_iso,
     )
 
-    if include_signals:
-        result.signals = [s.model_dump(mode="json") for s in all_signals]
+    # Always populate full detail for the cache
+    result.signals = [s.model_dump(mode="json") for s in all_signals]
+    result.missing_signals = list(_ALWAYS_MISSING_SIGNALS)
+    result.capabilities = capabilities.model_dump(mode="json")
+    result.weight_renormalization = {k: round(v, 4) for k, v in renormalized.items()}
 
-    if include_missing:
-        result.missing_signals = list(_ALWAYS_MISSING_SIGNALS)
-        result.capabilities = capabilities.model_dump(mode="json")
-        result.weight_renormalization = {k: round(v, 4) for k, v in renormalized.items()}
-
-    # 14. Write to cache
+    # 14. Write to cache (with full detail)
     try:
         if cache is None:
             cache = TrustCache()
@@ -1120,6 +1186,8 @@ def score_page(
             result,
             site_url=site_url,
             page_id=raw.page_id,
+            title=raw.title,
+            space_key=raw.space_key,
             page_version=raw.version_number,
             profile=profile.name,
             doc_class=primary_class,
@@ -1127,5 +1195,13 @@ def score_page(
     except Exception as exc:
         emit_stderr(f"Trust cache write failed (non-fatal): {exc}")
         result.cache = None
+
+    # Strip verbose fields from the returned result if not requested
+    if not include_signals:
+        result.signals = None
+    if not include_missing:
+        result.missing_signals = None
+        result.capabilities = None
+        result.weight_renormalization = None
 
     return result

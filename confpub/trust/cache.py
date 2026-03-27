@@ -29,7 +29,7 @@ ENV_CACHE_DIR = "CONFPUB_CACHE_DIR"
 _DEFAULT_CACHE_DIR = Path.home() / ".confpub"
 _DB_FILENAME = "trust-cache.sqlite3"
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 # TTLs in seconds
 TTL_PAGE_SCORE = 900  # 15 minutes
@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS page_score_cache (
     cache_key     TEXT PRIMARY KEY,
     site_url      TEXT NOT NULL,
     page_id       TEXT NOT NULL,
+    title         TEXT NOT NULL DEFAULT '',
+    space_key     TEXT NOT NULL DEFAULT '',
     page_version  INTEGER NOT NULL,
     algorithm_ver TEXT NOT NULL,
     profile       TEXT NOT NULL,
@@ -99,11 +101,16 @@ class TrustCache:
     def _ensure_schema(self) -> None:
         cur = self._conn.cursor()
         cur.executescript(_SCHEMA_SQL)
-        # Insert schema version if missing
-        cur.execute(
-            "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
-            (_SCHEMA_VERSION,),
-        )
+
+        # Migrate from v1 → v2: add title and space_key columns
+        try:
+            cur.execute("SELECT title FROM page_score_cache LIMIT 0")
+        except sqlite3.OperationalError:
+            cur.execute("ALTER TABLE page_score_cache ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE page_score_cache ADD COLUMN space_key TEXT NOT NULL DEFAULT ''")
+
+        cur.execute("DELETE FROM schema_version")
+        cur.execute("INSERT INTO schema_version (version) VALUES (?)", (_SCHEMA_VERSION,))
         self._conn.commit()
 
     # -- cache key -------------------------------------------------------
@@ -151,6 +158,8 @@ class TrustCache:
         *,
         site_url: str,
         page_id: str,
+        title: str = "",
+        space_key: str = "",
         page_version: int,
         profile: str,
         doc_class: str,
@@ -165,14 +174,16 @@ class TrustCache:
 
         self._conn.execute(
             """INSERT OR REPLACE INTO page_score_cache
-               (cache_key, site_url, page_id, page_version,
+               (cache_key, site_url, page_id, title, space_key, page_version,
                 algorithm_ver, profile, doc_class,
                 score_json, created_at, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 cache_key,
                 site_url,
                 page_id,
+                title,
+                space_key,
                 page_version,
                 ALGORITHM_VERSION,
                 profile,
@@ -215,16 +226,58 @@ class TrustCache:
             try:
                 data = orjson.loads(score_json)
                 is_stale = now > expires_at_str
+                advisory = data.get("advisory")
+                if not advisory:
+                    from confpub.trust.models import advisory_for
+                    advisory = advisory_for(data.get("band", "low"), data.get("confidence", 0.0))
                 result[pid] = {
                     "score": data.get("score"),
                     "band": data.get("band"),
                     "confidence": data.get("confidence"),
                     "primary_class": data.get("primary_class"),
+                    "advisory": advisory,
                     "stale": is_stale,
                 }
             except Exception:
                 continue
         return result
+
+    # -- full listing ----------------------------------------------------
+
+    def get_all_scores(self) -> list[dict[str, Any]]:
+        """Return all cached page scores as flat dicts for table display."""
+        now = datetime.now(timezone.utc).isoformat()
+        cur = self._conn.execute(
+            "SELECT page_id, title, space_key, page_version, profile, doc_class, "
+            "score_json, created_at, expires_at "
+            "FROM page_score_cache ORDER BY created_at DESC"
+        )
+        results: list[dict[str, Any]] = []
+        for row in cur.fetchall():
+            pid, title, space_key, version, profile, doc_class, score_json, created_at, expires_at = row
+            try:
+                data = orjson.loads(score_json)
+                results.append({
+                    "page_id": pid,
+                    "title": title,
+                    "space_key": space_key,
+                    "page_version": version,
+                    "profile": profile,
+                    "primary_class": data.get("primary_class", doc_class),
+                    "subtype": data.get("subtype"),
+                    "lifecycle_state": data.get("lifecycle_state"),
+                    "score": data.get("score", 0),
+                    "band": data.get("band", "?"),
+                    "confidence": data.get("confidence", 0.0),
+                    "subscores": data.get("subscores", {}),
+                    "hard_caps": data.get("hard_caps", []),
+                    "signals": data.get("signals"),
+                    "scored_at": data.get("scored_at", created_at),
+                    "stale": now > expires_at,
+                })
+            except Exception:
+                continue
+        return results
 
     # -- inspect ---------------------------------------------------------
 
@@ -278,7 +331,13 @@ class TrustCache:
             cur = self._conn.execute(
                 "DELETE FROM page_score_cache WHERE page_id = ?", (page_id,)
             )
+        elif space:
+            cur = self._conn.execute(
+                "DELETE FROM page_score_cache WHERE space_key = ?", (space,)
+            )
         elif older_than_hours is not None:
+            if older_than_hours < 0:
+                older_than_hours = 0
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
             ).isoformat()
@@ -286,7 +345,6 @@ class TrustCache:
                 "DELETE FROM page_score_cache WHERE created_at < ?", (cutoff,)
             )
         else:
-            # No criteria — nothing to delete
             cur = self._conn.execute("SELECT COUNT(*) FROM page_score_cache")
             return {"deleted_count": 0, "remaining_count": cur.fetchone()[0]}
 

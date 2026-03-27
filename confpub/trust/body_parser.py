@@ -33,6 +33,12 @@ class BodyFeatures:
     placeholder_texts: list[str] = field(default_factory=list)
     empty_section_count: int = 0
     outbound_link_count: int = 0
+    internal_link_count: int = 0
+    external_link_count: int = 0
+    jira_macro_count: int = 0
+    table_count: int = 0
+    image_count: int = 0
+    macro_names: list[str] = field(default_factory=list)
     anti_signal_matches: list[str] = field(default_factory=list)
 
 
@@ -97,11 +103,33 @@ def analyze_body(
         if not has_content:
             features.empty_section_count += 1
 
-    # --- Outbound links ---
-    features.outbound_link_count = len(soup.find_all("a", href=True))
-    # Also count Confluence internal links (<ac:link>)
+    # --- Links (external, internal, total) ---
+    for a_tag in soup.find_all("a", href=True):
+        href = a_tag["href"]
+        features.outbound_link_count += 1
+        if href.startswith(("http://", "https://")):
+            features.external_link_count += 1
+        else:
+            features.internal_link_count += 1
+    # Confluence internal links (<ac:link>)
     for tag in soup.find_all(["ac:link", "link"]):
         features.outbound_link_count += 1
+        features.internal_link_count += 1
+
+    # --- Tables ---
+    features.table_count = len(soup.find_all("table"))
+
+    # --- Images / attachments ---
+    features.image_count = len(soup.find_all("img"))
+    features.image_count += len(soup.find_all(["ac:image", "image"]))
+
+    # --- Confluence macros (jira, status, toc, etc.) ---
+    for tag in soup.find_all(["ac:structured-macro", "structured-macro"]):
+        macro_name = tag.get("ac:name") or tag.get("name") or ""
+        if macro_name:
+            features.macro_names.append(macro_name)
+            if macro_name == "jira":
+                features.jira_macro_count += 1
 
     # --- Placeholder text ---
     for pattern in _PLACEHOLDER_PATTERNS:

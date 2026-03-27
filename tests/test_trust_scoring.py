@@ -292,21 +292,32 @@ class TestFreshnessSubscore:
 class TestEvidenceSubscore:
     def test_full_evidence(self):
         meta = _full_meta()
-        raw = _make_raw(meta=meta)
-        score, signals = _compute_evidence(raw, meta, body_link_count=5)
-        assert score > 0.8
+        raw = _make_raw(meta=meta, body='<p><a href="https://x.com">link</a></p>' * 5)
+        features = analyze_body(raw.body_storage)
+        score, signals = _compute_evidence(raw, meta, features)
+        assert score > 0.5
 
-    def test_no_meta(self):
-        raw = _make_raw()
-        score, signals = _compute_evidence(raw, None, body_link_count=0)
-        assert score < 0.1
+    def test_no_meta_no_links(self):
+        raw = _make_raw(body="<p>Plain text</p>")
+        features = analyze_body(raw.body_storage)
+        score, signals = _compute_evidence(raw, None, features)
+        assert score < 0.2
 
-    def test_body_links_reference_density(self):
-        raw = _make_raw()
-        score_low, _ = _compute_evidence(raw, None, body_link_count=0)
-        score_mid, _ = _compute_evidence(raw, None, body_link_count=1)
-        score_high, _ = _compute_evidence(raw, None, body_link_count=3)
-        assert score_low < score_mid < score_high
+    def test_body_links_improve_score(self):
+        raw0 = _make_raw(body="<p>No links</p>")
+        raw3 = _make_raw(body='<p><a href="https://a.com">A</a> <a href="https://b.com">B</a> <a href="https://c.com">C</a></p>')
+        f0 = analyze_body(raw0.body_storage)
+        f3 = analyze_body(raw3.body_storage)
+        score_low, _ = _compute_evidence(raw0, None, f0)
+        score_high, _ = _compute_evidence(raw3, None, f3)
+        assert score_high > score_low
+
+    def test_jira_macros_in_body(self):
+        raw = _make_raw(body='<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">PROJ-123</ac:parameter></ac:structured-macro>')
+        features = analyze_body(raw.body_storage)
+        score, signals = _compute_evidence(raw, None, features)
+        jira_signal = next(s for s in signals if s.id == "jira_refs")
+        assert jira_signal.status == "positive"
 
 
 # ---------------------------------------------------------------------------
