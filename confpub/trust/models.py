@@ -242,6 +242,14 @@ class RawPageData(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ClassificationReasoning(BaseModel):
+    """Explains how and why a page was classified."""
+
+    source: str = "unknown"  # cli_override | meta_primary | meta_legacy | label | title_pattern | default
+    matched_value: str | None = None  # the value that matched (e.g. label name, pattern text)
+    evaluated_title_patterns: list[dict[str, Any]] = Field(default_factory=list)  # [{pattern, class, matched}]
+
+
 class ResolvedClassification(BaseModel):
     """Fully resolved page classification from all sources."""
 
@@ -250,6 +258,7 @@ class ResolvedClassification(BaseModel):
     domain: str | None = None
     lifecycle_state: str | None = None
     generation_mode: str | None = None
+    reasoning: ClassificationReasoning | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +283,7 @@ class PageScoreResult(BaseModel):
     subscores: dict[str, float]
     signals: list[dict[str, Any]] | None = None
     missing_signals: list[str] | None = None
+    classification: dict[str, Any] | None = None
     capabilities: dict[str, bool] | None = None
     weight_renormalization: dict[str, float] | None = None
     cache: dict[str, Any] | None = None

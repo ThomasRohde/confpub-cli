@@ -658,3 +658,264 @@ class TestEndToEndScoring:
 
 def TrustCache_make_cache_key_stub(site_url, page_id, page_version, profile, doc_class):
     return f"{site_url}|{page_id}|{page_version}|{profile}|{doc_class}"
+
+
+# ---------------------------------------------------------------------------
+# New title pattern tests (expanded heuristics)
+# ---------------------------------------------------------------------------
+
+
+class TestExpandedTitlePatterns:
+    """Tests for the expanded title-based classification heuristics."""
+
+    # instruction patterns
+    def test_step_n_instruction(self):
+        c = _resolve_classification(None, None, [], "STEP 3: Configure Networking", "current")
+        assert c.primary_class == "instruction"
+
+    def test_getting_started_instruction(self):
+        c = _resolve_classification(None, None, [], "Getting started with Kubernetes", "current")
+        assert c.primary_class == "instruction"
+
+    def test_onboarding_instruction(self):
+        c = _resolve_classification(None, None, [], "Developer Onboarding Guide", "current")
+        assert c.primary_class == "instruction"
+
+    def test_decommission_instruction(self):
+        c = _resolve_classification(None, None, [], "Service Decommission Checklist", "current")
+        assert c.primary_class == "instruction"
+
+    def test_preparation_guide_instruction(self):
+        c = _resolve_classification(None, None, [], "DR Preparation Guide", "current")
+        assert c.primary_class == "instruction"
+
+    def test_setup_guide_instruction(self):
+        c = _resolve_classification(None, None, [], "Development Setup Guide", "current")
+        assert c.primary_class == "instruction"
+
+    def test_quick_start_instruction(self):
+        c = _resolve_classification(None, None, [], "Quick Start for New Developers", "current")
+        assert c.primary_class == "instruction"
+
+    def test_tutorial_instruction(self):
+        c = _resolve_classification(None, None, [], "Git Tutorial for Beginners", "current")
+        assert c.primary_class == "instruction"
+
+    def test_troubleshooting_instruction(self):
+        c = _resolve_classification(None, None, [], "Network Troubleshooting", "current")
+        assert c.primary_class == "instruction"
+
+    # reference patterns
+    def test_terminology_reference(self):
+        c = _resolve_classification(None, None, [], "CLD2 Terminology", "current")
+        assert c.primary_class == "reference"
+
+    def test_api_example_reference(self):
+        c = _resolve_classification(None, None, [], "REST API Example", "current")
+        assert c.primary_class == "reference"
+
+    def test_terraform_example_reference(self):
+        c = _resolve_classification(None, None, [], "Terraform Example for VPCs", "current")
+        assert c.primary_class == "reference"
+
+    def test_tldr_reference(self):
+        c = _resolve_classification(None, None, [], "TL;DR Cloud Migration", "current")
+        assert c.primary_class == "reference"
+
+    def test_best_practices_reference(self):
+        c = _resolve_classification(None, None, [], "Best Practices for Logging", "current")
+        assert c.primary_class == "reference"
+
+    def test_resource_catalog_reference(self):
+        c = _resolve_classification(None, None, [], "Service Resource Catalog", "current")
+        assert c.primary_class == "reference"
+
+    def test_cheat_sheet_reference(self):
+        c = _resolve_classification(None, None, [], "Kubernetes Cheat Sheet", "current")
+        assert c.primary_class == "reference"
+
+    # hub patterns
+    def test_all_caps_title_hub(self):
+        c = _resolve_classification(None, None, [], "CLOUD PLATFORM", "current")
+        assert c.primary_class == "hub"
+
+    def test_all_caps_with_ampersand_hub(self):
+        c = _resolve_classification(None, None, [], "SECURITY & COMPLIANCE", "current")
+        assert c.primary_class == "hub"
+
+    def test_overview_suffix_hub(self):
+        c = _resolve_classification(None, None, [], "Platform Overview", "current")
+        assert c.primary_class == "hub"
+
+    def test_table_of_contents_hub(self):
+        c = _resolve_classification(None, None, [], "Table of Contents", "current")
+        assert c.primary_class == "hub"
+
+    # governance patterns (EAGOV)
+    def test_mandate_governance(self):
+        c = _resolve_classification(None, None, [], "Data Retention Mandate", "current")
+        assert c.primary_class == "governance"
+
+    def test_principles_governance(self):
+        c = _resolve_classification(None, None, [], "Architecture Principles", "current")
+        assert c.primary_class == "governance"
+
+    def test_guidelines_governance(self):
+        c = _resolve_classification(None, None, [], "API Guidelines", "current")
+        assert c.primary_class == "governance"
+
+    def test_eagov_numbered_governance(self):
+        c = _resolve_classification(None, None, [], "EAGOV-012 Data Classification", "current")
+        assert c.primary_class == "governance"
+
+    def test_governance_scope_governance(self):
+        c = _resolve_classification(None, None, [], "Enterprise Governance Scope", "current")
+        assert c.primary_class == "governance"
+
+    # specification patterns
+    def test_submission_template_specification(self):
+        c = _resolve_classification(None, None, [], "EAGOV Submission Template v2", "current")
+        assert c.primary_class == "specification"
+
+    # record patterns
+    def test_action_log_record(self):
+        c = _resolve_classification(None, None, [], "Q4 Action Log", "current")
+        assert c.primary_class == "record"
+
+    def test_survey_record(self):
+        c = _resolve_classification(None, None, [], "Developer Survey Results", "current")
+        assert c.primary_class == "record"
+
+    def test_feedback_record(self):
+        c = _resolve_classification(None, None, [], "Sprint Feedback Collection", "current")
+        assert c.primary_class == "record"
+
+    def test_issue_history_record(self):
+        c = _resolve_classification(None, None, [], "Platform Issue History", "current")
+        assert c.primary_class == "record"
+
+
+# ---------------------------------------------------------------------------
+# Classification explainability tests
+# ---------------------------------------------------------------------------
+
+
+class TestClassificationExplainability:
+    """Tests that classification reasoning is populated correctly."""
+
+    def test_cli_override_reasoning(self):
+        c = _resolve_classification("instruction", None, [], "Test Page", "current")
+        assert c.reasoning is not None
+        assert c.reasoning.source == "cli_override"
+        assert c.reasoning.matched_value == "instruction"
+
+    def test_meta_primary_reasoning(self):
+        meta = _full_meta(primary_class="governance")
+        c = _resolve_classification(None, meta, [], "Test Page", "current")
+        assert c.reasoning is not None
+        assert c.reasoning.source == "meta_primary"
+        assert c.reasoning.matched_value == "governance"
+
+    def test_meta_legacy_reasoning(self):
+        meta = ConfpubMeta(doc_class="runbook")
+        c = _resolve_classification(None, meta, [], "Test Page", "current")
+        assert c.reasoning is not None
+        assert c.reasoning.source == "meta_legacy"
+        assert c.reasoning.matched_value == "runbook"
+
+    def test_label_reasoning(self):
+        labels = [{"name": "policy"}]
+        c = _resolve_classification(None, None, labels, "Test Page", "current")
+        assert c.reasoning is not None
+        assert c.reasoning.source == "label"
+        assert c.reasoning.matched_value == "policy"
+
+    def test_title_pattern_reasoning(self):
+        c = _resolve_classification(None, None, [], "Getting started with Docker", "current")
+        assert c.reasoning is not None
+        assert c.reasoning.source == "title_pattern"
+        assert c.reasoning.matched_value is not None
+        assert len(c.reasoning.evaluated_title_patterns) > 0
+
+    def test_default_reasoning_with_evaluated_patterns(self):
+        c = _resolve_classification(None, None, [], "Something Completely Unique", "current")
+        assert c.reasoning is not None
+        assert c.reasoning.source == "default"
+        assert c.primary_class == "unknown"
+        # All title patterns should have been evaluated
+        assert len(c.reasoning.evaluated_title_patterns) > 0
+        assert all(not p["matched"] for p in c.reasoning.evaluated_title_patterns)
+
+    def test_title_pattern_shows_which_matched(self):
+        c = _resolve_classification(None, None, [], "STEP 1: Deploy the Service", "current")
+        assert c.reasoning is not None
+        assert c.reasoning.source == "title_pattern"
+        # At least one pattern should show matched=True
+        matched = [p for p in c.reasoning.evaluated_title_patterns if p["matched"]]
+        assert len(matched) >= 1
+        assert matched[0]["class"] == "instruction"
+
+
+# ---------------------------------------------------------------------------
+# Skill description validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestSkillDescriptionValidation:
+    """Tests for the 1024-char skill description limit."""
+
+    def test_current_skill_description_under_limit(self):
+        from confpub.skill_installer import SKILL_DESCRIPTION_MAX_LENGTH, _validate_skill_description, get_skill_data_path
+        source = get_skill_data_path()
+        result = _validate_skill_description(source)
+        assert result is None, f"SKILL.md description exceeds {SKILL_DESCRIPTION_MAX_LENGTH} chars"
+
+    def test_validates_over_limit(self, tmp_path):
+        from confpub.skill_installer import _validate_skill_description
+        skill = tmp_path / "SKILL.md"
+        long_desc = "x" * 1100
+        skill.write_text(f"---\nname: test\ndescription: {long_desc}\n---\n# Test\n")
+        result = _validate_skill_description(tmp_path)
+        assert result is not None
+        assert result["length"] == 1100
+        assert result["max_length"] == 1024
+        assert result["excess"] == 76
+
+    def test_validates_under_limit(self, tmp_path):
+        from confpub.skill_installer import _validate_skill_description
+        skill = tmp_path / "SKILL.md"
+        skill.write_text("---\nname: test\ndescription: Short description\n---\n# Test\n")
+        result = _validate_skill_description(tmp_path)
+        assert result is None
+
+    def test_install_raises_on_over_limit(self, tmp_path):
+        from confpub.skill_installer import _validate_skill_description, SKILL_DESCRIPTION_MAX_LENGTH
+        skill = tmp_path / "SKILL.md"
+        long_desc = "x" * 1100
+        skill.write_text(f"---\nname: test\ndescription: {long_desc}\n---\n# Test\n")
+        result = _validate_skill_description(tmp_path)
+        assert result is not None
+        assert result["field"] == "description"
+
+
+# ---------------------------------------------------------------------------
+# Cache TTL configuration tests
+# ---------------------------------------------------------------------------
+
+
+class TestCacheTTLConfiguration:
+    """Tests for the configurable cache TTL."""
+
+    def test_default_ttl_is_seven_days(self):
+        from confpub.trust.cache import _DEFAULT_TTL_PAGE_SCORE
+        assert _DEFAULT_TTL_PAGE_SCORE == 604800
+
+    def test_env_override_ttl(self, monkeypatch):
+        monkeypatch.setenv("CONFPUB_CACHE_TTL", "3600")
+        from confpub.trust.cache import _page_score_ttl
+        assert _page_score_ttl() == 3600
+
+    def test_invalid_env_ttl_uses_default(self, monkeypatch):
+        monkeypatch.setenv("CONFPUB_CACHE_TTL", "not-a-number")
+        from confpub.trust.cache import _page_score_ttl, _DEFAULT_TTL_PAGE_SCORE
+        assert _page_score_ttl() == _DEFAULT_TTL_PAGE_SCORE

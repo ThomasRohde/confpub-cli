@@ -226,19 +226,27 @@ class ScoreTableScreen(Screen):
         Binding("r", "rescore", "Re-score"),
         Binding("d", "delete_entry", "Delete"),
         Binding("s", "cycle_sort", "Sort"),
+        Binding("slash", "start_search", "Search"),
+        Binding("escape", "clear_search", "Clear"),
     ]
 
     _sort_columns = ["score", "band", "title", "primary_class", "space_key", "confidence"]
     _sort_index = 0
     _sort_reverse = True
     _entries: list[dict] = []
+    _all_entries: list[dict] = []
+    _search_query: str = ""
 
     def compose(self) -> ComposeResult:
+        from textual.widgets import Input
         yield Header()
+        yield Input(placeholder="Search titles, classes, spaces...", id="search-input")
         yield DataTable(id="score-table")
         yield Footer()
 
     def on_mount(self) -> None:
+        search_input = self.query_one("#search-input")
+        search_input.display = False
         self._load_data()
 
     def _load_data(self) -> None:
@@ -256,11 +264,32 @@ class ScoreTableScreen(Screen):
 
         try:
             cache = TrustCache()
-            self._entries = cache.get_all_scores()
+            self._all_entries = cache.get_all_scores()
             cache.close()
         except Exception:
-            self._entries = []
+            self._all_entries = []
 
+        self._apply_search()
+
+    def _apply_search(self) -> None:
+        """Filter entries by search query, then sort and populate."""
+        if self._search_query:
+            q = self._search_query.lower()
+            terms = q.split()
+            self._entries = [
+                e for e in self._all_entries
+                if all(
+                    term in (e.get("title") or "").lower()
+                    or term in (e.get("primary_class") or "").lower()
+                    or term in (e.get("space_key") or "").lower()
+                    or term in (e.get("lifecycle_state") or "").lower()
+                    or term in (e.get("band") or "").lower()
+                    or term in str(e.get("page_id", ""))
+                    for term in terms
+                )
+            ]
+        else:
+            self._entries = list(self._all_entries)
         self._sort_and_populate()
 
     def _sort_and_populate(self) -> None:
@@ -346,6 +375,26 @@ class ScoreTableScreen(Screen):
             self._sort_reverse = not self._sort_reverse
         self._sort_and_populate()
 
+    def action_start_search(self) -> None:
+        search_input = self.query_one("#search-input")
+        search_input.display = True
+        search_input.focus()
+
+    def action_clear_search(self) -> None:
+        from textual.widgets import Input
+        search_input = self.query_one("#search-input", Input)
+        if search_input.display:
+            search_input.value = ""
+            search_input.display = False
+            self._search_query = ""
+            self._apply_search()
+            self.query_one("#score-table", DataTable).focus()
+
+    def on_input_changed(self, event) -> None:
+        """React to search input changes."""
+        self._search_query = event.value
+        self._apply_search()
+
 
 # ---------------------------------------------------------------------------
 # App
@@ -359,6 +408,11 @@ class TrustBrowserApp(App):
     CSS = """
     Screen {
         background: $surface;
+    }
+    #search-input {
+        dock: top;
+        height: auto;
+        margin: 0 1;
     }
     #score-table {
         height: 1fr;

@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from confpub import __version__
-from confpub.errors import ConfpubError, ERR_CONFLICT_FILE_EXISTS, ERR_VALIDATION_REQUIRED
+from confpub.errors import ConfpubError, ERR_CONFLICT_FILE_EXISTS, ERR_VALIDATION_REQUIRED, ERR_VALIDATION_SKILL_DESCRIPTION
 
 SKILL_NAME = "confpub-publishing"
+SKILL_DESCRIPTION_MAX_LENGTH = 1024
 MARKER_START = "<!-- confpub-skill:v"
 MARKER_END = "<!-- /confpub-skill -->"
 
@@ -53,6 +54,33 @@ _DETECTION_RULES: list[tuple[str, list[str], str, str | None]] = [
     ("windsurf", [".windsurfrules", ".windsurf"], f".windsurf/skills/{SKILL_NAME}", ".windsurfrules"),
     ("agents-md", ["AGENTS.md"], f".agents/skills/{SKILL_NAME}", "AGENTS.md"),
 ]
+
+
+def _validate_skill_description(source: Path) -> dict[str, Any] | None:
+    """Validate the SKILL.md description length.
+
+    Returns a warning dict if over the limit, None if OK.
+    """
+    skill_md = source / "SKILL.md"
+    if not skill_md.exists():
+        return None
+    content = skill_md.read_text(encoding="utf-8")
+    # Extract description from frontmatter
+    if content.startswith("---"):
+        end = content.find("---", 3)
+        if end > 0:
+            frontmatter = content[3:end]
+            for line in frontmatter.splitlines():
+                if line.startswith("description:"):
+                    desc = line[len("description:"):].strip()
+                    if len(desc) > SKILL_DESCRIPTION_MAX_LENGTH:
+                        return {
+                            "field": "description",
+                            "length": len(desc),
+                            "max_length": SKILL_DESCRIPTION_MAX_LENGTH,
+                            "excess": len(desc) - SKILL_DESCRIPTION_MAX_LENGTH,
+                        }
+    return None
 
 
 def detect_agents(root: Path) -> list[AgentInfo]:
@@ -112,6 +140,17 @@ def install_skill(
     source = get_skill_data_path()
     if not source.is_dir():
         raise ConfpubError(ERR_VALIDATION_REQUIRED, f"Skill data not found at {source}")
+
+    # Preflight: validate description length
+    desc_issue = _validate_skill_description(source)
+    if desc_issue:
+        raise ConfpubError(
+            ERR_VALIDATION_SKILL_DESCRIPTION,
+            f"Skill description exceeds {desc_issue['max_length']} characters "
+            f"(current: {desc_issue['length']}, excess: {desc_issue['excess']}). "
+            f"Shorten the 'description' field in SKILL.md frontmatter.",
+            details=desc_issue,
+        )
 
     # Resolve agents
     if agents:
@@ -197,11 +236,23 @@ def inspect_skill(root: Path) -> dict[str, Any]:
             "installed_version": installed_version,
         })
 
-    return {
+    desc_issue = _validate_skill_description(source)
+
+    result: dict[str, Any] = {
         "detected_agents": detected,
         "skill_version": __version__,
         "skill_files": skill_files,
     }
+    if desc_issue:
+        result["warnings"] = [{
+            "code": ERR_VALIDATION_SKILL_DESCRIPTION,
+            "message": (
+                f"Skill description exceeds {desc_issue['max_length']} characters "
+                f"(current: {desc_issue['length']})"
+            ),
+            "details": desc_issue,
+        }]
+    return result
 
 
 # ---------------------------------------------------------------------------

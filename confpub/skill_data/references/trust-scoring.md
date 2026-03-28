@@ -152,7 +152,17 @@ Trust scores are automatically computed and cached whenever confpub interacts wi
 - `label add` / `label remove` — labels affect classification
 - `page history` — checking history scores the page
 
-Cache TTL is 15 minutes. If a fresh entry exists, scoring is skipped at zero cost.
+Cache TTL is 7 days by default. Override with the `CONFPUB_CACHE_TTL` environment variable (value in seconds). If a fresh entry exists, scoring is skipped at zero cost.
+
+### Bulk Cache Warming
+
+Pre-populate the cache for an entire space or CQL result set:
+
+```bash
+confpub trust cache warm --space EA
+confpub trust cache warm --cql 'label = "official-knowledge"'
+confpub trust cache warm --space EA --profile working-area
+```
 
 ## Search Enrichment
 
@@ -187,7 +197,7 @@ confpub trust profile inspect --name working-area  # Show one profile
 confpub trust browse    # TUI browser for cached scores
 ```
 
-Navigate with arrow keys, press Enter for detail view, `r` to re-score, `d` to delete, `s` to sort, `q` to quit.
+Navigate with arrow keys, press Enter for detail view, `r` to re-score, `d` to delete, `s` to sort, `/` to search, `Escape` to clear search, `q` to quit. Search filters by title, class, space, band, and page ID.
 
 ## Governance Metadata (`confpub.meta.v1`)
 
@@ -264,6 +274,29 @@ confpub page score --page-id 123456 --refresh --explain full
 ```
 
 The most impactful fixes are usually: add headings + labels + links (structure/evidence), remove placeholders (structure), and set `confpub.meta.v1` with owner and review date (stewardship).
+
+## Classification Explainability
+
+When scoring with `--explain summary` or `--explain full`, the result includes a `classification` field showing exactly how the primary class was resolved:
+
+```bash
+confpub page score --page-id 123456 --explain summary
+```
+
+The `classification` field contains:
+- `source` — how the class was determined: `cli_override`, `meta_primary`, `meta_legacy`, `label`, `title_pattern`, or `default`
+- `matched_value` — the specific value that triggered the match (label name, regex pattern, etc.)
+- `evaluated_title_patterns` — full list of title patterns evaluated and whether each matched (only when classification fell through to title inference)
+
+This makes it straightforward to understand why a page is classified as `unknown` and which patterns could be added or tuned.
+
+## Recursive Anchors
+
+Use `--recursive` with `--page-id` to anchor a page and all its descendants:
+
+```bash
+confpub trust anchor set --page-id 123456 --level high --reason "Approved tree" --recursive
+```
 
 ## Missing Signals
 

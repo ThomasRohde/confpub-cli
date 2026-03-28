@@ -465,6 +465,7 @@ def build_guide() -> dict[str, Any]:
                     "subscores": "{stewardship, freshness, evidence, structure, corroboration} — each float 0-1",
                     "signals": "list of {id, status, weight, value, source} (when --include-signals)",
                     "missing_signals": "list of string (when --include-missing)",
+                    "classification": "{source, matched_value, evaluated_title_patterns} — classification reasoning (when --explain summary or full)",
                 },
                 "examples": [
                     "confpub page score --page-id 123456",
@@ -473,25 +474,18 @@ def build_guide() -> dict[str, Any]:
                     "confpub page score --page-id 123456 --profile working-area --refresh",
                 ],
             },
-            "space.score": {
+            "trust.browse": {
                 "group": "read",
                 "mutates": False,
-                "description": "Score a space's aggregate trustworthiness",
-                "flags": [
-                    "--space", "--profile", "--window",
-                    "--top", "--include-pages", "--include-low-pages",
-                    "--page-limit", "--refresh",
-                ],
+                "description": "Interactive TUI browser for cached trust scores",
+                "flags": [],
                 "agent_hint": (
-                    "Aggregates page scores with coverage metrics. "
-                    "Returns weighted median score, ownership/review coverage, and burden metrics. "
-                    "Use --include-low-pages to surface pages needing attention. "
-                    "Use --top N to include the top N pages by score."
+                    "Opens an interactive terminal UI showing all cached trust scores in a sortable table. "
+                    "Press Enter for detail view, r to re-score, d to delete, s to sort, / to search, q to quit. "
+                    "Requires cached scores — run page score or trust cache warm first."
                 ),
                 "examples": [
-                    "confpub space score --space EA",
-                    "confpub space score --space EA --include-low-pages",
-                    "confpub space score --space EA --top 20 --profile official-knowledge",
+                    "confpub trust browse",
                 ],
             },
             "trust.profile.inspect": {
@@ -499,12 +493,6 @@ def build_guide() -> dict[str, Any]:
                 "mutates": False,
                 "description": "Show built-in or custom scoring profiles",
                 "flags": [],
-            },
-            "trust.profile.validate": {
-                "group": "read",
-                "mutates": False,
-                "description": "Validate a custom scoring profile file",
-                "flags": ["--file"],
             },
             "trust.cache.inspect": {
                 "group": "read",
@@ -516,36 +504,58 @@ def build_guide() -> dict[str, Any]:
                 "group": "write",
                 "mutates": True,
                 "description": "Clear trust cache entries",
-                "flags": ["--space"],
-                "examples": ["confpub trust cache purge --space EA"],
+                "flags": ["--space", "--page-id", "--older-than", "--all"],
+                "examples": [
+                    "confpub trust cache purge --space EA",
+                    "confpub trust cache purge --all",
+                    "confpub trust cache purge --older-than 24",
+                ],
             },
             "trust.cache.warm": {
                 "group": "write",
                 "mutates": True,
                 "description": "Precompute trust scores for a space or CQL result set",
-                "flags": ["--space", "--cql"],
+                "flags": ["--space", "--cql", "--profile"],
+                "agent_hint": (
+                    "Iterates all pages in a space or CQL result set and scores each one. "
+                    "Use this to pre-populate the cache before browsing with trust browse. "
+                    "Progress is reported on stderr."
+                ),
                 "examples": [
                     "confpub trust cache warm --space EA",
                     'confpub trust cache warm --cql \'label = "official-knowledge"\'',
                 ],
             },
-            "trust.stamp.page": {
+            "trust.anchor.set": {
                 "group": "write",
                 "mutates": True,
-                "description": "Write confpub.trust.v1 content property to a page",
-                "flags": ["--page-id", "--space", "--title", "--profile", "--if-fresh", "--force", "--dry-run"],
-                "safety_flags": {
-                    "--force": "Overwrites existing confpub.trust.v1 without version check",
-                },
+                "description": "Declare a trust level for a space or page",
+                "flags": ["--space", "--page-id", "--level", "--reason", "--recursive"],
                 "agent_hint": (
-                    "Ordinary page score commands never mutate Confluence. "
-                    "Use trust stamp to explicitly write the computed score as a content property. "
-                    "The stamped property is disposable — delete and recompute at any time."
+                    "Anchors override computed scores. Use --level high/good for trusted spaces, "
+                    "caution/low for unreliable ones, exclude to hide entirely. "
+                    "Use --recursive with --space to include all child pages."
                 ),
                 "examples": [
-                    "confpub trust stamp page --page-id 123456",
-                    'confpub trust stamp page --space EA --title "Target Architecture" --if-fresh',
-                    "confpub trust stamp page --page-id 123456 --dry-run",
+                    'confpub trust anchor set --space EA --level high --reason "Architecture team"',
+                    "confpub trust anchor set --page-id 123456 --level caution --reason \"Needs review\"",
+                ],
+            },
+            "trust.anchor.list": {
+                "group": "read",
+                "mutates": False,
+                "description": "List all declared trust anchors",
+                "flags": [],
+                "examples": ["confpub trust anchor list"],
+            },
+            "trust.anchor.remove": {
+                "group": "write",
+                "mutates": True,
+                "description": "Remove a trust anchor",
+                "flags": ["--space", "--page-id"],
+                "examples": [
+                    "confpub trust anchor remove --space EA",
+                    "confpub trust anchor remove --page-id 123456",
                 ],
             },
         },

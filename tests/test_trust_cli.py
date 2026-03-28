@@ -146,3 +146,69 @@ class TestPageScoreWithMockedClient:
         assert "band" in data["result"]
         assert "subscores" in data["result"]
         assert 0 <= data["result"]["score"] <= 100
+
+
+class TestTrustCacheWarmHelp:
+    def test_warm_help_shows_flags(self):
+        result = runner.invoke(app, ["trust", "cache", "warm", "--help"])
+        assert result.exit_code == 0
+        assert "--space" in result.output
+        assert "--cql" in result.output
+        assert "--profile" in result.output
+
+    def test_warm_requires_space_or_cql(self):
+        result = runner.invoke(app, ["trust", "cache", "warm"])
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["ok"] is False
+
+
+class TestTrustAnchorHelp:
+    def test_anchor_set_help(self):
+        result = runner.invoke(app, ["trust", "anchor", "set", "--help"])
+        assert result.exit_code == 0
+        assert "--space" in result.output
+        assert "--level" in result.output
+        assert "--recursive" in result.output
+
+    def test_anchor_list_help(self):
+        result = runner.invoke(app, ["trust", "anchor", "list", "--help"])
+        assert result.exit_code == 0
+
+    def test_anchor_remove_help(self):
+        result = runner.invoke(app, ["trust", "anchor", "remove", "--help"])
+        assert result.exit_code == 0
+        assert "--space" in result.output
+
+
+class TestTrustBrowseHelp:
+    def test_browse_registered(self):
+        result = runner.invoke(app, ["trust", "browse", "--help"])
+        assert result.exit_code == 0
+
+
+class TestGuideAlignment:
+    """Verify the guide does not reference unimplemented commands."""
+
+    def test_no_unimplemented_commands_in_guide(self):
+        from confpub.guide import build_guide
+        guide = build_guide()
+        commands = guide["commands"]
+        # These should NOT be in the guide (not implemented)
+        assert "space.score" not in commands
+        assert "trust.profile.validate" not in commands
+        assert "trust.stamp.page" not in commands
+
+    def test_implemented_commands_in_guide(self):
+        from confpub.guide import build_guide
+        guide = build_guide()
+        commands = guide["commands"]
+        # These should be in the guide (implemented)
+        assert "trust.browse" in commands
+        assert "trust.anchor.set" in commands
+        assert "trust.anchor.list" in commands
+        assert "trust.anchor.remove" in commands
+        assert "trust.cache.warm" in commands
+        assert "trust.cache.inspect" in commands
+        assert "trust.cache.purge" in commands
+        assert "trust.profile.inspect" in commands

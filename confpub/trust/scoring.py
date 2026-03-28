@@ -25,6 +25,7 @@ from confpub.trust.models import (
     PRIMARY_CLASSES,
     LIFECYCLE_STATES,
     Capabilities,
+    ClassificationReasoning,
     ConfpubMeta,
     PageScoreResult,
     ProfileConfig,
@@ -134,23 +135,73 @@ _LABEL_TO_LIFECYCLE: dict[str, str] = {
 }
 
 _TITLE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # decision
     (re.compile(r"(?i)^ADR[\s\-]?\d+"), "decision"),
+    # record
     (re.compile(r"(?i)\bmeeting[\s\-]?notes?\b"), "record"),
     (re.compile(r"(?i)\bminutes\b"), "record"),
+    (re.compile(r"(?i)\baction[\s\-]?log\b"), "record"),
+    (re.compile(r"(?i)\bsurvey\b"), "record"),
+    (re.compile(r"(?i)\bfeedback\b"), "record"),
+    (re.compile(r"(?i)\bissue[\s\-]?history\b"), "record"),
+    # instruction — procedural patterns
+    (re.compile(r"(?i)^STEP\s+\d+"), "instruction"),
     (re.compile(r"(?i)\brunbook\b"), "instruction"),
     (re.compile(r"(?i)\bplaybook\b"), "instruction"),
     (re.compile(r"(?i)\bhow[\s\-]?to\b"), "instruction"),
+    (re.compile(r"(?i)^getting[\s\-]?started\b"), "instruction"),
+    (re.compile(r"(?i)\bonboarding\b"), "instruction"),
+    (re.compile(r"(?i)\baccess[\s\-]?guide\b"), "instruction"),
+    (re.compile(r"(?i)\bdecommission"), "instruction"),
+    (re.compile(r"(?i)\bpreparation[\s\-]?guide\b"), "instruction"),
+    (re.compile(r"(?i)\bsetup[\s\-]?guide\b"), "instruction"),
+    (re.compile(r"(?i)\binstallation[\s\-]?guide\b"), "instruction"),
+    (re.compile(r"(?i)\bquick[\s\-]?start\b"), "instruction"),
+    (re.compile(r"(?i)\btutorial\b"), "instruction"),
+    (re.compile(r"(?i)\bprocedure\b"), "instruction"),
+    (re.compile(r"(?i)\btroubleshooting\b"), "instruction"),
+    (re.compile(r"(?i)\bsop\b"), "instruction"),
+    # report
     (re.compile(r"(?i)\bstatus[\s\-]?report\b"), "report"),
     (re.compile(r"(?i)\brelease[\s\-]?notes?\b"), "report"),
+    # governance — including EAGOV patterns
     (re.compile(r"(?i)\bpolicy\b"), "governance"),
-    (re.compile(r"(?i)\broadmap\b"), "plan"),
+    (re.compile(r"(?i)\bmandate\b"), "governance"),
+    (re.compile(r"(?i)\bprinciples?\b"), "governance"),
+    (re.compile(r"(?i)\bguidelines?\b"), "governance"),
+    (re.compile(r"(?i)\brules?\b(?:\s+for\b|\s+of\b)"), "governance"),
+    (re.compile(r"(?i)\bstandard\b"), "governance"),
+    (re.compile(r"(?i)^(?:EAGOV|EA[\s\-]?GOV)[\s\-]?\d+"), "governance"),
+    (re.compile(r"(?i)\bgovernance[\s\-]?scope\b"), "governance"),
+    # specification — including EAGOV submission templates
     (re.compile(r"(?i)\barchitecture\b"), "specification"),
     (re.compile(r"(?i)\bdesign[\s\-]?spec\b"), "specification"),
+    (re.compile(r"(?i)\bsubmission[\s\-]?template\b"), "specification"),
+    # plan
+    (re.compile(r"(?i)\broadmap\b"), "plan"),
+    # people_org
     (re.compile(r"(?i)\bhandbook\b"), "people_org"),
     (re.compile(r"(?i)\borg[\s\-]?chart\b"), "people_org"),
+    # reference — expanded patterns
     (re.compile(r"(?i)\bglossary\b"), "reference"),
     (re.compile(r"(?i)\bFAQ\b"), "reference"),
+    (re.compile(r"(?i)\bterminology\b"), "reference"),
+    (re.compile(r"(?i)\bAPI[\s\-]?example\b"), "reference"),
+    (re.compile(r"(?i)\bterraform[\s\-]?example\b"), "reference"),
+    (re.compile(r"(?i)\bTL\s*;?\s*DR\b"), "reference"),
+    (re.compile(r"(?i)\bbest[\s\-]?practices?\b"), "reference"),
+    (re.compile(r"(?i)\bresource[\s\-]?catalog\b"), "reference"),
+    (re.compile(r"(?i)\breference[\s\-]?guide\b"), "reference"),
+    (re.compile(r"(?i)\bcheat[\s\-]?sheet\b"), "reference"),
+    # hub — section headers and index pages
+    (re.compile(r"^[A-Z][A-Z\s\-&]{4,}$"), "hub"),
+    (re.compile(r"(?i)\bindex\b"), "hub"),
+    (re.compile(r"(?i)\bhomepage\b"), "hub"),
+    (re.compile(r"(?i)\boverview\b$"), "hub"),
+    (re.compile(r"(?i)\btable[\s\-]?of[\s\-]?contents\b"), "hub"),
+    # scaffold
     (re.compile(r"(?i)\btemplate\b"), "scaffold"),
+    # analysis
     (re.compile(r"(?i)\breview\b"), "analysis"),
     (re.compile(r"(?i)\bassessment\b"), "analysis"),
     (re.compile(r"(?i)\broot[\s\-]?cause\b"), "analysis"),
@@ -170,6 +221,7 @@ def _resolve_classification(
     For lifecycle_state: meta.lifecycle_state > labels > page status > None.
     """
     result = ResolvedClassification()
+    reasoning = ClassificationReasoning()
 
     # --- primary_class ---
     if class_override:
@@ -177,6 +229,8 @@ def _resolve_classification(
             # Check if it's a legacy doc_class value
             if class_override in _LEGACY_CLASS_MAP:
                 result.primary_class = _LEGACY_CLASS_MAP[class_override]
+                reasoning.source = "cli_override"
+                reasoning.matched_value = class_override
             else:
                 raise ConfpubError(
                     ERR_VALIDATION_TRUST_DOC_CLASS,
@@ -186,25 +240,43 @@ def _resolve_classification(
                 )
         else:
             result.primary_class = class_override
+            reasoning.source = "cli_override"
+            reasoning.matched_value = class_override
     elif meta and meta.primary_class and meta.primary_class in PRIMARY_CLASSES:
         result.primary_class = meta.primary_class
+        reasoning.source = "meta_primary"
+        reasoning.matched_value = meta.primary_class
     elif meta and meta.doc_class:
         # Legacy fallback
         result.primary_class = _LEGACY_CLASS_MAP.get(meta.doc_class, "unknown")
+        reasoning.source = "meta_legacy"
+        reasoning.matched_value = meta.doc_class
     else:
         # Infer from labels
         for lbl in labels:
             name = lbl.get("name", "").lower()
             if name in _LABEL_TO_CLASS:
                 result.primary_class = _LABEL_TO_CLASS[name]
+                reasoning.source = "label"
+                reasoning.matched_value = name
                 break
 
         # Infer from title
         if result.primary_class == "unknown":
             for pattern, cls in _TITLE_PATTERNS:
-                if pattern.search(title):
+                matched = bool(pattern.search(title))
+                reasoning.evaluated_title_patterns.append({
+                    "pattern": pattern.pattern,
+                    "class": cls,
+                    "matched": matched,
+                })
+                if matched and result.primary_class == "unknown":
                     result.primary_class = cls
-                    break
+                    reasoning.source = "title_pattern"
+                    reasoning.matched_value = pattern.pattern
+
+            if result.primary_class == "unknown":
+                reasoning.source = "default"
 
     # --- subtype (from meta only) ---
     if meta and meta.subtype:
@@ -232,6 +304,7 @@ def _resolve_classification(
     if meta and meta.generation_mode:
         result.generation_mode = meta.generation_mode
 
+    result.reasoning = reasoning
     return result
 
 
@@ -1171,6 +1244,8 @@ def score_page(
     result.missing_signals = list(_ALWAYS_MISSING_SIGNALS)
     result.capabilities = capabilities.model_dump(mode="json")
     result.weight_renormalization = {k: round(v, 4) for k, v in renormalized.items()}
+    if classification.reasoning:
+        result.classification = classification.reasoning.model_dump(mode="json")
 
     # 14. Write to cache (with full detail)
     try:
@@ -1203,5 +1278,6 @@ def score_page(
         result.missing_signals = None
         result.capabilities = None
         result.weight_renormalization = None
+        result.classification = None
 
     return result

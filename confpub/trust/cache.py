@@ -26,14 +26,29 @@ from confpub.trust.models import ALGORITHM_VERSION, PageScoreResult
 # ---------------------------------------------------------------------------
 
 ENV_CACHE_DIR = "CONFPUB_CACHE_DIR"
+ENV_CACHE_TTL = "CONFPUB_CACHE_TTL"
 _DEFAULT_CACHE_DIR = Path.home() / ".confpub"
 _DB_FILENAME = "trust-cache.sqlite3"
 
 _SCHEMA_VERSION = 2
 
-# TTLs in seconds
-TTL_PAGE_SCORE = 900  # 15 minutes
+# TTLs in seconds — default page score TTL is 7 days
+_DEFAULT_TTL_PAGE_SCORE = 604800  # 7 days
 TTL_CAPABILITY = 86400  # 24 hours
+
+
+def _page_score_ttl() -> int:
+    """Return the page score TTL in seconds, respecting CONFPUB_CACHE_TTL."""
+    env = os.environ.get(ENV_CACHE_TTL)
+    if env:
+        try:
+            return int(env)
+        except ValueError:
+            pass
+    return _DEFAULT_TTL_PAGE_SCORE
+
+
+TTL_PAGE_SCORE = _page_score_ttl()
 
 
 def _cache_dir() -> Path:

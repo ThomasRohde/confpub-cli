@@ -34,6 +34,18 @@ def _warm_trust_cache(client: Any, page_id: str) -> None:
         pass
 
 
+def _collect_child_pages(client: Any, page_id: str) -> list[str]:
+    """Recursively collect all child page IDs under a parent."""
+    result: list[str] = []
+    children = client.get_page_children(page_id)
+    for child in children:
+        cid = str(child.get("id", ""))
+        if cid:
+            result.append(cid)
+            result.extend(_collect_child_pages(client, cid))
+    return result
+
+
 def _resolve_space(cli_space: str | None, required: bool = False, fm_space: str | None = None) -> str | None:
     """Resolve space from CLI flag, front-matter, or CONFPUB_SPACE env var, with validation."""
     from confpub.config import ENV_SPACE
@@ -1302,6 +1314,79 @@ def trust_cache_purge(
             cache.close()
 
 
+@trust_cache_app.command("warm")
+def trust_cache_warm(
+    space: Optional[str] = typer.Option(None, "--space", help="Space key to warm"),
+    cql: Optional[str] = typer.Option(None, "--cql", help="CQL query to select pages"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Scoring profile override"),
+) -> None:
+    """Precompute trust scores for a space or CQL result set."""
+    with command_context("trust.cache.warm", target={"space": space, "cql": cql}) as ctx:
+        if not space and not cql:
+            raise ConfpubError(
+                "ERR_VALIDATION_REQUIRED",
+                "Either --space or --cql is required",
+            )
+        from confpub.confluence import build_client
+        from confpub.trust.scoring import score_page as _score_page
+
+        client = build_client()
+        ctx.client = client
+
+        # Collect page IDs
+        page_ids: list[tuple[str, str]] = []  # (page_id, title)
+        if space:
+            space = _resolve_space(space) or space
+            start = 0
+            while True:
+                batch = client.list_pages(space, start=start, limit=100)
+                for p in batch.get("pages", []):
+                    pid = str(p.get("id", ""))
+                    ptitle = p.get("title", "")
+                    if pid:
+                        page_ids.append((pid, ptitle))
+                if not batch.get("has_more"):
+                    break
+                start += batch.get("limit", 100)
+        elif cql:
+            start = 0
+            while True:
+                batch = client.search(cql, start=start, limit=100)
+                for r in batch.get("results", []):
+                    pid = str(r.get("id", ""))
+                    ptitle = r.get("title", "")
+                    if pid:
+                        page_ids.append((pid, ptitle))
+                if not batch.get("has_more"):
+                    break
+                start += batch.get("limit", 100)
+
+        total = len(page_ids)
+        scored = 0
+        failed = 0
+        emit_stderr(f"Warming {total} pages...")
+
+        for i, (pid, ptitle) in enumerate(page_ids, 1):
+            try:
+                _score_page(
+                    client,
+                    page_id=pid,
+                    profile_name=profile,
+                    refresh=True,
+                )
+                scored += 1
+            except Exception:
+                failed += 1
+            if i % 10 == 0 or i == total:
+                emit_stderr(f"  [{i}/{total}] scored={scored} failed={failed}")
+
+        ctx.result = {
+            "total_pages": total,
+            "scored": scored,
+            "failed": failed,
+        }
+
+
 @trust_profile_app.command("inspect")
 def trust_profile_inspect(
     name: Optional[str] = typer.Option(None, "--name", help="Profile name (omit for all)"),
@@ -1327,6 +1412,7 @@ def trust_anchor_set(
     page_id: Optional[str] = typer.Option(None, "--page-id", help="Page ID to anchor"),
     level: str = typer.Option(..., "--level", help="Trust level: high, good, caution, low, exclude"),
     reason: str = typer.Option("", "--reason", help="Why this anchor exists"),
+    recursive: bool = typer.Option(False, "--recursive", help="Include child pages (with --page-id)"),
 ) -> None:
     """Declare a trust level for a space or page."""
     with command_context("trust.anchor.set", target={"space": space, "page_id": page_id}) as ctx:
@@ -1344,6 +1430,13 @@ def trust_anchor_set(
             anchors.spaces[space] = anchor
         if page_id:
             anchors.pages[page_id] = anchor
+            if recursive:
+                from confpub.confluence import build_client
+                client = build_client()
+                ctx.client = client
+                child_ids = _collect_child_pages(client, page_id)
+                for cid in child_ids:
+                    anchors.pages[cid] = anchor
         path = save_anchors(anchors)
         # Invalidate affected cache entries so stale anchor data doesn't persist
         try:
