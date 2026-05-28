@@ -372,7 +372,7 @@ def page_publish(
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without writing"),
     backup: bool = typer.Option(False, "--backup", help="Backup existing page before overwriting"),
     label: Optional[list[str]] = typer.Option(None, "--label", help="Label to apply (repeatable)"),
-    html_macro_name: Optional[str] = typer.Option(None, "--html-macro-name", help="HTML macro name (html for DC, html-macro for Cloud; auto-detected by default)"),
+    html_macro_name: Optional[str] = typer.Option(None, "--html-macro-name", help="HTML macro name (html for DC; Cloud apps vary, default html-macro)"),
 ) -> None:
     """Publish a single Markdown file to Confluence."""
     from pathlib import Path as _Path
@@ -436,7 +436,7 @@ def page_publish(
         cli_labels = label or []
         merged_labels = list(dict.fromkeys(cli_labels + fm_labels))
 
-        # Resolve html_macro_name: CLI flag > front-matter > auto-detect
+        # Resolve html_macro_name: CLI flag > front-matter > config/env/default in publish_page
         fm_html_macro = fm.html_macro_name if fm else None
         effective_html_macro = html_macro_name or fm_html_macro
 
@@ -643,7 +643,7 @@ def plan_create(
     output: Optional[str] = typer.Option(None, "--output", help="Output path for plan artifact"),
     space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     parent: Optional[str] = typer.Option(None, "--parent", help="Override manifest parent"),
-    html_macro_name: Optional[str] = typer.Option(None, "--html-macro-name", help="HTML macro name (html for DC, html-macro for Cloud; auto-detected by default)"),
+    html_macro_name: Optional[str] = typer.Option(None, "--html-macro-name", help="HTML macro name (html for DC; Cloud apps vary, default html-macro)"),
 ) -> None:
     """Generate a plan artifact from a manifest."""
     with command_context("plan.create", target={"manifest": manifest}) as ctx:
@@ -677,7 +677,7 @@ def plan_apply(
     backup: bool = typer.Option(False, "--backup", help="Backup pages before overwriting"),
     skip_fingerprint_check: bool = typer.Option(False, "--skip-fingerprint-check", help="Skip stale-state detection"),
     cascade: bool = typer.Option(False, "--cascade", help="Allow cascading deletes"),
-    html_macro_name: Optional[str] = typer.Option(None, "--html-macro-name", help="HTML macro name (html for DC, html-macro for Cloud; auto-detected by default)"),
+    html_macro_name: Optional[str] = typer.Option(None, "--html-macro-name", help="HTML macro name (html for DC; Cloud apps vary, default html-macro)"),
 ) -> None:
     """Apply a plan to Confluence."""
     with command_context("plan.apply", target={"plan": plan}) as ctx:
@@ -718,7 +718,7 @@ def auth_inspect() -> None:
 
 @config_app.command("set")
 def config_set(
-    key: str = typer.Argument(..., help="Configuration key (base_url, user, token)"),
+    key: str = typer.Argument(..., help="Configuration key (base_url, user, token, ssl_verify, html_macro_name)"),
     value: str = typer.Argument(..., help="Configuration value"),
 ) -> None:
     """Set a configuration value."""
@@ -856,9 +856,10 @@ def comment_add(
             md_text = text
 
         from confpub.config import load_config as _load_comment_config
+        from confpub.config import resolve_html_macro_name as _resolve_comment_html_macro_name
         from confpub.converter import convert_markdown
         _comment_config = _load_comment_config()
-        _comment_html_macro = "html-macro" if _comment_config.is_cloud else "html"
+        _comment_html_macro = _resolve_comment_html_macro_name(_comment_config)
         storage_body = convert_markdown(md_text, html_macro_name=_comment_html_macro)
 
         from confpub.confluence import build_client

@@ -55,6 +55,16 @@ confpub plan apply --plan confpub-plan.json
 confpub page publish page.md --space SD --dry-run
 ```
 
+### Confluence Cloud HTML Macro Notes
+
+Confluence Cloud HTML macro keys depend on the installed Marketplace app. Do not assume every Cloud site uses `html-macro`; observed Cloud keys include `html-macro` and `macro-html`.
+
+When publishing `::: html` blocks to Cloud:
+1. Run a dry run first.
+2. Publish, then verify the rendered page, not only the storage body.
+3. If the rendered page shows `unknown-macro?name=...`, inspect a working HTML macro page and republish with `--html-macro-name`.
+4. Persist known site keys with `html_macro_name` front matter, `CONFPUB_HTML_MACRO_NAME`, or `confpub config set html_macro_name`.
+
 For manifest structure, labels strategy, and advanced publishing workflows, read `references/workflow.md`.
 
 ## Syntax Cheat Sheet

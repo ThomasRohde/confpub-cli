@@ -92,7 +92,7 @@ parent: "Engineering Docs"
 labels:
   - architecture
   - approved
-html_macro_name: html-macro
+html_macro_name: macro-html
 page_id: "123456"
 ---
 ```

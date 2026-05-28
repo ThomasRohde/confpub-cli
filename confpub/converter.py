@@ -768,8 +768,8 @@ def convert_markdown(md_text: str, *, html_macro_name: str = "html") -> str:
 
     Args:
         md_text: Markdown source text.
-        html_macro_name: Name for the HTML macro (``"html"`` for DC,
-            ``"html-macro"`` for Cloud).
+        html_macro_name: Name for the HTML macro. The CLI resolves platform
+            defaults and config before calling this pure converter.
 
     Returns:
         Confluence Storage Format XHTML string.

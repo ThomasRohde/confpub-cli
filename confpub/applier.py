@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from confpub.assets import AssetRef, discover_assets, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
-from confpub.config import load_config
+from confpub.config import load_config, resolve_html_macro_name
 from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, fingerprint_content
 from confpub.errors import ERR_CONFLICT_FINGERPRINT, ERR_IO_FILE_NOT_FOUND, ConfpubError
@@ -39,8 +39,8 @@ def apply_plan(
     config = load_config()
     client = ConfluenceClient(config)
 
-    # Resolve html_macro_name: explicit > auto-detect from config
-    effective_html_macro = html_macro_name or ("html-macro" if config.is_cloud else "html")
+    # Resolve html_macro_name: explicit > config/env > platform default
+    effective_html_macro = resolve_html_macro_name(config, html_macro_name)
 
     # Load or create lockfile
     lockfile_path = plan_dir / "confpub.lock"

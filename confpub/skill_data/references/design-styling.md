@@ -2,6 +2,82 @@
 
 Ready-to-use HTML macro patterns for visual designs beyond native Confluence. Use `::: html` blocks to embed these.
 
+## Attachment-Backed Interactive Widget for Cloud
+
+Use this pattern for Confluence Cloud HTML macro apps that sandbox iframe content. Load data through a JavaScript attachment callback instead of `fetch()` to a JSON attachment, and use one delegated event handler on the widget root.
+
+`page.md`:
+
+```markdown
+::: html
+<style>
+  .confpub-widget { border: 1px solid #DFE1E6; border-radius: 6px; padding: 12px; }
+  .confpub-widget .control { cursor: pointer; margin-right: 8px; }
+</style>
+
+<div id="confpub-widget" class="confpub-widget">
+  <div data-role="status">Waiting for attachment scripts...</div>
+  <div data-role="controls"></div>
+  <div data-role="details"></div>
+</div>
+
+<link rel="preload" as="script" href="data.js" data-confpub-data>
+<script src="widget.js"></script>
+:::
+```
+
+`widget.js`:
+
+```javascript
+(function (global, document) {
+  var root = document.getElementById("confpub-widget");
+  var state = { source: "none", lastAction: "none", rows: [] };
+
+  function render() {
+    root.querySelector('[data-role="status"]').textContent =
+      "Data source: " + state.source + " | Last action: " + state.lastAction;
+    root.querySelector('[data-role="controls"]').innerHTML =
+      state.rows.map(function (row, index) {
+        return '<button class="control" data-index="' + index + '">' + row.name + "</button>";
+      }).join("");
+    root.querySelector('[data-role="details"]').textContent =
+      state.rows.length ? "Loaded " + state.rows.length + " rows" : "No rows loaded";
+  }
+
+  root.addEventListener("click", function (event) {
+    var button = event.target.closest("[data-index]");
+    if (!button) return;
+    state.lastAction = "clicked " + state.rows[Number(button.dataset.index)].name;
+    render();
+  });
+
+  window.__widgetDataReady = function (payload, source) {
+    state.rows = payload.rows || [];
+    state.source = source || "data.js";
+    state.lastAction = "data loaded";
+    render();
+  };
+
+  var dataLink = document.querySelector("link[data-confpub-data]");
+  var script = document.createElement("script");
+  script.src = dataLink ? dataLink.href : "data.js";
+  document.body.appendChild(script);
+  render();
+}(window, document));
+```
+
+`data.js`:
+
+```javascript
+(function (global) {
+  global.__widgetDataReady({
+    rows: [{ name: "Alpha" }, { name: "Beta" }]
+  }, "script attachment");
+}(window));
+```
+
+The preload link makes `data.js` discoverable so confpub uploads it and rewrites the URL before `widget.js` loads it dynamically. This proves the HTML macro renders, `widget.js` executes, `data.js` executes, and click events work inside the sandbox. Avoid external CDNs, `eval`, and JSON `fetch()` for Cloud examples unless testing CORS directly.
+
 ## KPI Cards
 
 Colored metric cards for dashboards.

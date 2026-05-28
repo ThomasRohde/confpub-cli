@@ -52,17 +52,17 @@ Navigation or metadata on the left, content on the right.
 ```markdown
 :::: layout two-three
 ::: cell
-::: panel Quick Links
+### Quick Links
+
 - [API Reference](API Reference)
 - [Runbooks](Runbooks)
-:::
 
-::: panel Contacts
+### Contacts
+
 | Role | Person |
 |------|--------|
 | Lead | @lead |
 | On-call | @oncall |
-:::
 :::
 ::: cell
 ## Main Content
@@ -127,5 +127,29 @@ Monthly: $12.4K
 - Cell count must match layout type (2 cells for two-column, 3 for three-column)
 - **Do not nest** layouts inside layouts — Confluence doesn't support it
 - Content outside layout blocks is auto-wrapped in a `single` layout
-- Panels, admonitions, tables, code blocks all work inside cells
+- Tables, lists, headings, and code blocks work reliably inside cells
+- Avoid placing `::: panel` directly inside `::: cell` unless you have verified the generated storage. Same-length colon fences can be parsed as closing the cell and may leak literal `:::` markers in Cloud.
+- Prefer a heading/list inside the cell, or publish a panel outside the layout
 - Avoid wide tables in narrow columns — use `two-equal` or `single` for wide tables
+
+## Nested Container Fence Safety
+
+Avoid:
+
+```markdown
+::: cell
+::: panel Quick links
+- [API Reference](API Reference)
+:::
+:::
+```
+
+Prefer:
+
+```markdown
+::: cell
+### Quick links
+
+- [API Reference](API Reference)
+:::
+```

@@ -33,9 +33,27 @@ confpub config set user you@example.com
 | `CONFPUB_TOKEN` | API token (Cloud) or PAT (Server/DC) |
 | `CONFPUB_SPACE` | Default space key (avoids `--space` on every command) |
 | `CONFPUB_SSL_VERIFY` | SSL verification (`true`/`false` or CA bundle path) |
+| `CONFPUB_HTML_MACRO_NAME` | HTML macro key for `::: html` blocks when your Cloud app differs from the built-in fallback |
 | `LLM=true` | Suppress interactive prompts; return structured errors instead |
 
 **Credential precedence:** CLI flags > environment variables > config file (`~/.config/confpub/config.json`) > OS keychain.
+
+## Personal Spaces and PowerShell
+
+Personal space keys begin with `~`, for example `~username`. Some shells or tools can expand `~username` to a local path before confpub receives it. In PowerShell, prefer:
+
+```powershell
+$env:CONFPUB_SPACE = "~username"
+confpub page list --limit 5
+```
+
+over:
+
+```powershell
+confpub page list --space "~username"
+```
+
+If confpub reports a path such as `C:\Users\username`, set `CONFPUB_SPACE` and omit `--space`.
 
 ### Installing the Skill
 
@@ -72,6 +90,24 @@ confpub page publish doc.md --space SD --parent "Engineering" --backup
 ```
 
 After publishing, the JSON response includes a `webui` URL to verify in browser.
+
+## Cloud Rendering Verification
+
+For Cloud pages that use HTML macros, layouts, includes, Jira, or page links, verify the rendered view after publishing:
+
+1. Publish with `--dry-run`.
+2. Publish live only after the dry run shows the intended change.
+3. Inspect storage:
+   ```bash
+   confpub page inspect --page-id PAGE_ID --raw
+   ```
+4. Check the rendered page for:
+   - `unknown-macro?name=...`
+   - literal `:::` markers
+   - literal `[text](Page Title)` links
+   - HTML macro iframe console errors relevant to the custom widget
+
+Storage being valid is not enough; Cloud macro apps can still fail at render time.
 
 ## Multi-Page Tree (Safe Path)
 

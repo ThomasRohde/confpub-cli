@@ -7,8 +7,11 @@ import pytest
 
 from confpub.config import (
     ConfigModel,
+    ENV_HTML_MACRO_NAME,
     ResolvedConfig,
+    default_html_macro_name,
     load_config,
+    resolve_html_macro_name,
     set_config_value,
 )
 from confpub.errors import ConfpubError, ERR_AUTH_REQUIRED
@@ -66,6 +69,12 @@ class TestResolvedConfig:
         d = cfg.to_display_dict()
         assert d["token"] == "***"
 
+    def test_to_display_dict_includes_html_macro_resolution(self):
+        cfg = ResolvedConfig(base_url="https://x.atlassian.net/wiki")
+        d = cfg.to_display_dict()
+        assert d["html_macro_name"] is None
+        assert d["effective_html_macro_name"] == "html-macro"
+
 
 class TestLoadConfig:
     def test_cli_flags_take_precedence(self, monkeypatch):
@@ -80,16 +89,20 @@ class TestLoadConfig:
         monkeypatch.setenv("CONFPUB_URL", "https://env.atlassian.net/wiki")
         monkeypatch.setenv("CONFPUB_TOKEN", "env_token")
         monkeypatch.setenv("CONFPUB_USER", "user@example.com")
+        monkeypatch.setenv(ENV_HTML_MACRO_NAME, "html-macro")
         cfg = load_config()
         assert cfg.base_url == "https://env.atlassian.net/wiki"
         assert cfg.token == "env_token"
         assert cfg.user == "user@example.com"
         assert cfg.token_source == "env_var"
+        assert cfg.html_macro_name == "html-macro"
 
-    def test_no_config(self, monkeypatch):
+    def test_no_config(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("confpub.config.CONFIG_FILE", tmp_path / "missing-config.json")
         monkeypatch.delenv("CONFPUB_URL", raising=False)
         monkeypatch.delenv("CONFPUB_TOKEN", raising=False)
         monkeypatch.delenv("CONFPUB_USER", raising=False)
+        monkeypatch.delenv(ENV_HTML_MACRO_NAME, raising=False)
         cfg = load_config()
         assert cfg.base_url is None
         assert cfg.token is None
@@ -109,3 +122,47 @@ class TestSetConfigValue:
         monkeypatch.setattr("confpub.config.CONFIG_FILE", tmp_path / "config.json")
         with pytest.raises(ConfpubError):
             set_config_value("unknown_key", "value")
+
+    def test_set_html_macro_name(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("confpub.config.CONFIG_DIR", tmp_path)
+        monkeypatch.setattr("confpub.config.CONFIG_FILE", config_file)
+        set_config_value("html_macro_name", "html-macro")
+        data = json.loads(config_file.read_text())
+        assert data["html_macro_name"] == "html-macro"
+
+
+class TestHtmlMacroNameResolution:
+    def test_default_cloud_macro_name(self):
+        assert default_html_macro_name(True) == "html-macro"
+
+    def test_default_server_macro_name(self):
+        assert default_html_macro_name(False) == "html"
+
+    def test_override_wins_over_config(self):
+        cfg = ResolvedConfig(
+            base_url="https://x.atlassian.net/wiki",
+            html_macro_name="html-macro",
+        )
+        assert resolve_html_macro_name(cfg, "custom-html") == "custom-html"
+
+    def test_config_wins_over_platform_default(self):
+        cfg = ResolvedConfig(
+            base_url="https://x.atlassian.net/wiki",
+            html_macro_name="html-macro",
+        )
+        assert resolve_html_macro_name(cfg) == "html-macro"
+
+    def test_file_config_is_loaded(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "base_url": "https://x.atlassian.net/wiki",
+            "html_macro_name": "html-macro",
+        }))
+        monkeypatch.setattr("confpub.config.CONFIG_FILE", config_file)
+        monkeypatch.delenv(ENV_HTML_MACRO_NAME, raising=False)
+
+        cfg = load_config()
+
+        assert cfg.html_macro_name == "html-macro"
+        assert resolve_html_macro_name(cfg) == "html-macro"

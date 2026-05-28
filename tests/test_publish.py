@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from confpub.config import ResolvedConfig
 from confpub.errors import ConfpubError, ERR_IO_FILE_NOT_FOUND
 from confpub.publish import derive_title, publish_page
 
@@ -159,6 +160,57 @@ class TestPublishCreate:
         assert result["dry_run"] is False
         assert result["changes"][0]["type"] == "page.create"
         mock_client.create_page.assert_called_once()
+
+    @patch("confpub.publish.load_config")
+    @patch("confpub.publish.ConfluenceClient")
+    def test_cloud_default_html_macro_is_html_macro(self, MockClient, mock_config, tmp_path, mock_client):
+        md_file = tmp_path / "html.md"
+        md_file.write_text("::: html\n<b>bold</b>\n:::")
+
+        def get_page_side_effect(space, title):
+            if title == "Root":
+                return {"id": "root_1"}
+            return None
+
+        mock_client.get_page.side_effect = get_page_side_effect
+        MockClient.return_value = mock_client
+        mock_config.return_value = ResolvedConfig(base_url="https://test.atlassian.net/wiki")
+
+        publish_page(
+            file=str(md_file),
+            space="DEV",
+            parent="Root",
+        )
+
+        storage = mock_client.create_page.call_args[0][2]
+        assert '<ac:structured-macro ac:name="html-macro">' in storage
+
+    @patch("confpub.publish.load_config")
+    @patch("confpub.publish.ConfluenceClient")
+    def test_configured_html_macro_name_overrides_cloud_default(self, MockClient, mock_config, tmp_path, mock_client):
+        md_file = tmp_path / "html.md"
+        md_file.write_text("::: html\n<b>bold</b>\n:::")
+
+        def get_page_side_effect(space, title):
+            if title == "Root":
+                return {"id": "root_1"}
+            return None
+
+        mock_client.get_page.side_effect = get_page_side_effect
+        MockClient.return_value = mock_client
+        mock_config.return_value = ResolvedConfig(
+            base_url="https://test.atlassian.net/wiki",
+            html_macro_name="macro-html",
+        )
+
+        publish_page(
+            file=str(md_file),
+            space="DEV",
+            parent="Root",
+        )
+
+        storage = mock_client.create_page.call_args[0][2]
+        assert '<ac:structured-macro ac:name="macro-html">' in storage
 
     @patch("confpub.publish.load_config")
     @patch("confpub.publish.ConfluenceClient")

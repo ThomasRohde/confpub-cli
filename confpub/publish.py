@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from confpub.assets import discover_assets, discover_html_macro_warnings, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
-from confpub.config import load_config
+from confpub.config import load_config, resolve_html_macro_name
 from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, fingerprint_content
 from confpub.errors import (
@@ -82,8 +82,8 @@ def publish_page(
     # Build client (needed for is_cloud detection)
     config = load_config()
 
-    # Resolve html_macro_name: explicit > ("html-macro" if cloud else "html")
-    effective_html_macro = html_macro_name or ("html-macro" if config.is_cloud else "html")
+    # Resolve html_macro_name: explicit/front-matter > config/env > platform default.
+    effective_html_macro = resolve_html_macro_name(config, html_macro_name)
     storage = convert_markdown(md_text, html_macro_name=effective_html_macro)
     local_fingerprint = fingerprint_content(storage)
     client = ConfluenceClient(config)

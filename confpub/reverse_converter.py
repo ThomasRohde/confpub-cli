@@ -110,7 +110,7 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
             return self._convert_page_ref_macro(el, macro_name)
         if macro_name == "excerpt":
             return self._convert_excerpt_macro(el)
-        if macro_name in ("html", "html-macro"):
+        if macro_name in ("html", "html-macro", "macro-html"):
             return self._convert_html_macro(el)
         # Unknown macro
         self._unknown_macros.append(macro_name)

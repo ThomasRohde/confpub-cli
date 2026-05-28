@@ -154,6 +154,75 @@ class TestInstallSkill:
         assert "Unknown agent" in str(exc_info.value)
 
 
+class TestInstalledSkillContent:
+    def _installed_skill_dir(self, repo):
+        (repo / "CLAUDE.md").write_text("# CLAUDE")
+        install_skill(repo)
+        return repo / ".claude" / "skills" / SKILL_NAME
+
+    def test_cloud_html_macro_guidance_installed(self, repo):
+        skill_dir = self._installed_skill_dir(repo)
+
+        skill_md = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        html_ref = (skill_dir / "references" / "syntax-html-macro.md").read_text(encoding="utf-8")
+
+        assert "Marketplace app" in skill_md
+        assert "html-macro" in skill_md
+        assert "macro-html" in skill_md
+        assert "CONFPUB_HTML_MACRO_NAME" in skill_md
+
+        assert "Cloud vs. Server/DC Macro Names" in html_ref
+        assert "html-macro` or `macro-html" in html_ref
+        assert "confpub page publish page.md --html-macro-name macro-html" in html_ref
+        assert "confpub page inspect --page-id PAGE_ID --raw" in html_ref
+        assert '<ac:structured-macro ac:name="...">' in html_ref
+        assert "confpub config set html_macro_name macro-html" in html_ref
+        assert "CONFPUB_HTML_MACRO_NAME=macro-html" in html_ref
+
+    def test_cloud_sandbox_and_widget_guidance_installed(self, repo):
+        skill_dir = self._installed_skill_dir(repo)
+
+        html_ref = (skill_dir / "references" / "syntax-html-macro.md").read_text(encoding="utf-8")
+        styling_ref = (skill_dir / "references" / "design-styling.md").read_text(encoding="utf-8")
+
+        assert "sandboxed iframe" in html_ref
+        assert "fetch()" in html_ref
+        assert "CORS" in html_ref
+        assert "Data as JavaScript callback" in html_ref
+
+        assert "Attachment-Backed Interactive Widget for Cloud" in styling_ref
+        assert "window.__widgetDataReady" in styling_ref
+        assert "data-confpub-data" in styling_ref
+        assert "dataLink ? dataLink.href" in styling_ref
+        assert "script.src = dataLink" in styling_ref
+        assert "Data source:" in styling_ref
+        assert "Last action:" in styling_ref
+        assert "delegated" in styling_ref
+
+    def test_layout_links_and_power_shell_guidance_installed(self, repo):
+        skill_dir = self._installed_skill_dir(repo)
+
+        layouts_ref = (skill_dir / "references" / "layouts.md").read_text(encoding="utf-8")
+        macros_ref = (skill_dir / "references" / "syntax-macros.md").read_text(encoding="utf-8")
+        workflow_ref = (skill_dir / "references" / "workflow.md").read_text(encoding="utf-8")
+
+        assert "Avoid placing `::: panel` directly inside `::: cell`" in layouts_ref
+        assert "leak literal `:::` markers" in layouts_ref
+        assert "### Quick links" in layouts_ref
+
+        assert "Cloud Page Link Caveats" in macros_ref
+        assert "apostrophes" in macros_ref
+        assert "literal Markdown" in macros_ref
+        assert "https://example.atlassian.net/wiki/spaces/~username/overview" in macros_ref
+
+        assert "Personal Spaces and PowerShell" in workflow_ref
+        assert '$env:CONFPUB_SPACE = "~username"' in workflow_ref
+        assert "Cloud Rendering Verification" in workflow_ref
+        assert "unknown-macro?name=..." in workflow_ref
+        assert "literal `:::` markers" in workflow_ref
+        assert "Storage being valid is not enough" in workflow_ref
+
+
 class TestInspectSkill:
     def test_inspect_empty_repo(self, repo):
         result = inspect_skill(repo)

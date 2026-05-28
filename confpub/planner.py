@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from confpub.assets import discover_assets
-from confpub.config import load_config
+from confpub.config import load_config, resolve_html_macro_name
 from confpub.confluence import ConfluenceClient
 from confpub.converter import convert_markdown, fingerprint_content
 from confpub.errors import ERR_IO_FILE_NOT_FOUND, ERR_VALIDATION_REQUIRED, ConfpubError
@@ -54,8 +54,8 @@ def create_plan(
     config = load_config()
     client = ConfluenceClient(config)
 
-    # Resolve html_macro_name: explicit > auto-detect from config
-    effective_html_macro = html_macro_name or ("html-macro" if config.is_cloud else "html")
+    # Resolve html_macro_name: explicit > config/env > platform default
+    effective_html_macro = resolve_html_macro_name(config, html_macro_name)
 
     # Resolve page tree
     flat_pages = resolve_page_tree(manifest)

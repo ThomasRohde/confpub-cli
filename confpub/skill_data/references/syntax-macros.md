@@ -108,3 +108,13 @@ Links to other Confluence pages — use the page title as the URL:
 ```
 
 confpub auto-converts these to native Confluence page links (`ri:page` references). Link text can differ from page title. External URLs work normally.
+
+## Cloud Page Link Caveats
+
+Page-title links can fail to convert in Cloud when the title contains apostrophes, special characters, or points to a personal-space home page. If a rendered page shows literal Markdown such as `[Personal home](Example User's Home)`, use an absolute Confluence URL or inspect the target page and link by a stable URL.
+
+For Cloud personal spaces, the overview URL is typically:
+
+```text
+https://example.atlassian.net/wiki/spaces/~username/overview
+```

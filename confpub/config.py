@@ -24,6 +24,10 @@ ENV_TOKEN = "CONFPUB_TOKEN"
 ENV_USER = "CONFPUB_USER"
 ENV_SSL_VERIFY = "CONFPUB_SSL_VERIFY"
 ENV_SPACE = "CONFPUB_SPACE"
+ENV_HTML_MACRO_NAME = "CONFPUB_HTML_MACRO_NAME"
+
+DEFAULT_HTML_MACRO_NAME_SERVER = "html"
+DEFAULT_HTML_MACRO_NAME_CLOUD = "html-macro"
 
 
 class ConfigModel(BaseModel):
@@ -33,6 +37,7 @@ class ConfigModel(BaseModel):
     user: Optional[str] = None
     token: Optional[str] = None
     ssl_verify: Optional[str] = None
+    html_macro_name: Optional[str] = None
 
 
 class ResolvedConfig:
@@ -45,12 +50,14 @@ class ResolvedConfig:
         token: str | None = None,
         token_source: str | None = None,
         ssl_verify: bool | str = False,
+        html_macro_name: str | None = None,
     ) -> None:
         self.base_url = base_url
         self.user = user
         self.token = token
         self.token_source = token_source
         self.ssl_verify = ssl_verify
+        self.html_macro_name = html_macro_name
 
     @property
     def is_cloud(self) -> bool:
@@ -110,6 +117,8 @@ class ResolvedConfig:
             "token": "***" if self.token else None,
             "token_source": self.token_source,
             "is_cloud": self.is_cloud,
+            "html_macro_name": self.html_macro_name,
+            "effective_html_macro_name": resolve_html_macro_name(self),
         }
 
 
@@ -150,6 +159,39 @@ def _resolve_ssl_verify(raw: str | None) -> bool | str:
     return raw.strip()
 
 
+def _normalize_optional_string(raw: str | None) -> str | None:
+    """Return a stripped string, or None for missing/blank values."""
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value or None
+
+
+def default_html_macro_name(is_cloud: bool) -> str:
+    """Return the built-in HTML macro fallback for a Confluence deployment."""
+    return DEFAULT_HTML_MACRO_NAME_CLOUD if is_cloud else DEFAULT_HTML_MACRO_NAME_SERVER
+
+
+def resolve_html_macro_name(config: Any, override: str | None = None) -> str:
+    """Resolve the HTML macro name for Markdown conversion.
+
+    Precedence is caller override, resolved config, then platform default.
+    The Cloud default is only a fallback; Marketplace apps can register
+    different macro names.
+    """
+    override_value = _normalize_optional_string(override)
+    if override_value:
+        return override_value
+
+    configured = getattr(config, "html_macro_name", None)
+    if isinstance(configured, str):
+        configured_value = _normalize_optional_string(configured)
+        if configured_value:
+            return configured_value
+
+    return default_html_macro_name(bool(getattr(config, "is_cloud", False)))
+
+
 def load_config(
     cli_url: str | None = None,
     cli_user: str | None = None,
@@ -169,6 +211,12 @@ def load_config(
     # SSL verification
     ssl_raw = cli_ssl_verify or os.environ.get(ENV_SSL_VERIFY) or file_cfg.ssl_verify
     ssl_verify = _resolve_ssl_verify(ssl_raw)
+
+    # HTML macro name (for ::: html blocks)
+    html_macro_name = (
+        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_NAME))
+        or _normalize_optional_string(file_cfg.html_macro_name)
+    )
 
     # Determine source
     token_source = None
@@ -192,6 +240,7 @@ def load_config(
         token=token,
         token_source=token_source,
         ssl_verify=ssl_verify,
+        html_macro_name=html_macro_name,
     )
 
 
@@ -208,11 +257,13 @@ def set_config_value(key: str, value: str) -> None:
         cfg.token = value
     elif key == "ssl_verify":
         cfg.ssl_verify = value
+    elif key == "html_macro_name":
+        cfg.html_macro_name = value
     else:
         from confpub.errors import ERR_VALIDATION_REQUIRED, validation_error
         raise validation_error(
             ERR_VALIDATION_REQUIRED,
-            f"Unknown config key: {key}. Valid keys: base_url, user, token, ssl_verify",
+            f"Unknown config key: {key}. Valid keys: base_url, user, token, ssl_verify, html_macro_name",
         )
 
     CONFIG_FILE.write_text(json.dumps(cfg.model_dump(exclude_none=True), indent=2), encoding="utf-8")

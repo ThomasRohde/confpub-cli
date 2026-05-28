@@ -123,6 +123,17 @@ class TestHtmlMacroReverse:
         assert "::: html" in result.markdown
         assert "<b>bold</b>" in result.markdown
 
+    def test_cloud_macro_html_macro(self):
+        storage = (
+            '<ac:structured-macro ac:name="macro-html">'
+            "<ac:plain-text-body><![CDATA[<b>bold</b>]]></ac:plain-text-body>"
+            "</ac:structured-macro>"
+        )
+        result = convert_storage_to_markdown(storage)
+        assert "::: html" in result.markdown
+        assert "<b>bold</b>" in result.markdown
+        assert result.unknown_macros == []
+
 
 # ---------------------------------------------------------------------------
 # Roundtrip tests

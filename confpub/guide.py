@@ -154,8 +154,9 @@ def build_guide() -> dict[str, Any]:
                     "---\\ntitle: Page Title\\nspace: SPACEKEY\\nparent: Parent Title\\nlabels:\\n  - tag1\\n---\\n "
                     "For personal spaces, quote the tilde: --space '~username' "
                     "(PowerShell expands unquoted ~). Or set CONFPUB_SPACE env var. "
-                    "HTML macro name: auto-detected from Confluence type (Cloud=html-macro, DC=html). "
-                    "Override with --html-macro-name or html_macro_name in front-matter. "
+                    "HTML macro name: DC default is html; Cloud fallback is html-macro, "
+                    "but Cloud apps vary. Override with --html-macro-name, "
+                    "html_macro_name in front-matter, CONFPUB_HTML_MACRO_NAME, or config. "
                     "After a successful publish (not dry-run), the trust score cache is warmed for the published page."
                 ),
             },
@@ -388,13 +389,14 @@ def build_guide() -> dict[str, Any]:
                 "flags": [],
                 "args": ["KEY", "VALUE"],
                 "agent_hint": (
-                    "Valid keys: base_url, user, token. "
-                    "Values are persisted to the config file (~/.confpub/config.json)."
+                    "Valid keys: base_url, user, token, ssl_verify, html_macro_name. "
+                    "Values are persisted to the config file (~/.config/confpub/config.json)."
                 ),
                 "examples": [
                     "confpub config set base_url https://mysite.atlassian.net/wiki",
                     "confpub config set user alice@example.com",
                     "confpub config set token ATATT...",
+                    "confpub config set html_macro_name html-macro",
                 ],
             },
             "config.inspect": {
@@ -720,13 +722,15 @@ def build_guide() -> dict[str, Any]:
                 "excerpt_include":  "{excerpt-include:Page Title} → ac:structured-macro excerpt-include",
                 "include_page":     "{include:Page Title} → ac:structured-macro include",
                 "html_macro": (
-                    "::: html\\n<raw HTML>\\n::: → ac:structured-macro html (DC) or html-macro (Cloud). "
+                    "::: html\\n<raw HTML>\\n::: -> ac:structured-macro html (DC) or html-macro (Cloud fallback). "
                     "Content is wrapped in CDATA and passed verbatim — Confluence does NOT strip "
                     "<style>, <script>, <iframe>, or any other tags inside the HTML macro. "
                     "Use this for custom CSS styling, dashboards, diagrams, embedded widgets, "
                     "or any HTML that Confluence would otherwise sanitize. "
-                    "The macro name is auto-detected (Cloud=html-macro, DC=html) but can be "
-                    "overridden via --html-macro-name flag or html_macro_name front-matter field. "
+                    "Confluence Cloud HTML macro names vary by installed app. The Cloud fallback "
+                    "is html-macro, but macro-html is also used by some apps. Override via "
+                    "--html-macro-name, html_macro_name front-matter, CONFPUB_HTML_MACRO_NAME, "
+                    "or confpub config set html_macro_name. "
                     "ASSET AUTO-DISCOVERY: <script src=\"app.js\"> and <link href=\"style.css\"> "
                     "references inside ::: html blocks are automatically detected. The referenced "
                     "files are uploaded as page attachments and the src/href URLs in the CDATA "
@@ -857,7 +861,7 @@ def build_guide() -> dict[str, Any]:
                 "parent": "Parent page title (string)",
                 "labels": "Labels to apply (list of strings, or single string)",
                 "page_id": "Confluence page ID for direct update (string or integer)",
-                "html_macro_name": "HTML macro name override (string; 'html' for DC, 'html-macro' for Cloud; auto-detected by default)",
+                "html_macro_name": "HTML macro name override (string; 'html' for DC; Cloud apps vary, built-in fallback is 'html-macro')",
             },
             "precedence": {
                 "title": "--title > --title-from-h1 > front-matter > filename",
@@ -865,7 +869,7 @@ def build_guide() -> dict[str, Any]:
                 "parent": "--parent > front-matter",
                 "page_id": "--page-id > front-matter",
                 "labels": "CLI --label + front-matter labels merged (deduplicated)",
-                "html_macro_name": "--html-macro-name > front-matter > auto-detect (Cloud=html-macro, DC=html)",
+                "html_macro_name": "--html-macro-name > front-matter > CONFPUB_HTML_MACRO_NAME/config > platform fallback (Cloud=html-macro, DC=html)",
             },
             "example": (
                 "---\n"
@@ -924,6 +928,7 @@ def build_guide() -> dict[str, Any]:
                 "CONFPUB_USER": "User email or username",
                 "CONFPUB_SSL_VERIFY": "SSL verification (true/false/ca-bundle path)",
                 "CONFPUB_SPACE": "Default space key (avoids shell expansion issues with --space)",
+                "CONFPUB_HTML_MACRO_NAME": "HTML macro name for ::: html blocks",
             },
             "non_interactive": (
                 "Never prompts when LLM=true or stdin is non-interactive"

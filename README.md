@@ -461,7 +461,7 @@ Confluence strips `<style>`, `<script>`, `<iframe>`, and other tags from normal 
 :::
 ```
 
-The macro name is auto-detected: `html-macro` for Confluence Cloud, `html` for Data Center/Server. Override with `--html-macro-name` or `html_macro_name` in front-matter.
+The macro name is selected from your Confluence type: `html` for Data Center/Server and `html-macro` as the Cloud fallback. Confluence Cloud HTML macro apps can register different macro keys, including `macro-html`, so override per publish with `--html-macro-name` or `html_macro_name` in front-matter when needed. To persist the setting, run `confpub config set html_macro_name macro-html` or set `CONFPUB_HTML_MACRO_NAME`.
 
 ### Interactive JavaScript Applications
 
@@ -583,6 +583,7 @@ confpub guide --section commands       # Just commands
 | `CONFPUB_URL` | Confluence base URL |
 | `CONFPUB_SPACE` | Default space key |
 | `CONFPUB_SSL_VERIFY` | SSL verification (`true`/`false` or CA bundle path) |
+| `CONFPUB_HTML_MACRO_NAME` | HTML macro key for `::: html` blocks, if your Confluence Cloud app differs from the built-in fallback |
 
 ---
 
