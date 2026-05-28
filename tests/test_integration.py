@@ -1,6 +1,7 @@
 """Integration tests — end-to-end CLI with mocked Confluence."""
 
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -8,6 +9,12 @@ from confpub.cli import app
 
 
 runner = CliRunner()
+
+
+class TestPackagingMetadata:
+    def test_click_is_direct_runtime_dependency(self):
+        pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+        assert '"click>=8.0"' in pyproject
 
 
 class TestCLIHelp:
