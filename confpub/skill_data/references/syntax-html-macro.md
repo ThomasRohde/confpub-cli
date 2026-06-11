@@ -35,37 +35,58 @@ Local file references in `<script src="...">` and `<link href="...">` are automa
 
 The CSS and JS files are uploaded alongside the page. Missing files produce warnings but don't block publishing.
 
-Attachment URL rewriting makes local files loadable as page resources. It does not guarantee those URLs are readable through `fetch()` or XHR from every Cloud HTML macro app.
+Only static `<script src>` and `<link href>` references in the HTML block are auto-discovered. Files referenced at runtime by JavaScript, including injected scripts and `fetch()` URLs, are not discovered by `page publish`; upload those files manually with `confpub attachment upload`.
 
-## Cloud HTML Macro Sandbox Behavior
+## Cloud Forge Runtime Summary
 
-In Confluence Cloud, HTML macros are often rendered by a Marketplace app inside a sandboxed iframe. The iframe origin can differ from the Confluence site origin. Attachment-backed scripts can load as browser resources, while `fetch()` to Confluence attachment URLs may fail due CORS.
+Forge HTML macro apps on Confluence Cloud run client-side in sandboxed, cross-origin iframes. These runtime behaviors were browser-confirmed on Appfire "HTML for Confluence":
 
-| Pattern | Cloud behavior |
-|---------|----------------|
-| `<script src="local.js"></script>` | Often works after confpub uploads and rewrites the attachment URL |
-| `<link rel="stylesheet" href="local.css">` | May work, warn, or fail depending on the macro app CSP |
-| `fetch("data.json")` after URL rewrite | May fail because the macro iframe origin differs from Confluence |
-| Data as JavaScript callback | More reliable than JSON fetch for attachment-backed data |
+| Scenario | Method | Forge Cloud result | Server/DC |
+|----------|--------|--------------------|-----------|
+| Execute JavaScript from a page attachment | `<script src="widget.js">` | Works | Works |
+| Load data from attached JSON | `fetch("data.json")` | Blocked by cross-origin iframe and missing CORS headers | Works |
+| Load data from an attachment | `data.js` script that calls a global callback | Works | Works |
+| Read config from another HTML macro | `document.getElementById()` in a second macro | Blocked; each macro has its own iframe DOM | Works |
+| Read another macro via `window.parent` or `window.top` | frame traversal | Blocked with `SecurityError` | Not applicable |
+| Read config embedded in the same macro | `<script type="application/json">` plus reader in one `::: html` block | Works | Works |
 
-For Cloud interactive widgets, prefer loading data as a script callback:
+Rules:
+- Attachment JavaScript and CSS loaded with static `<script src>` / `<link href>` can execute after confpub rewrites the URLs.
+- Do not fetch Confluence attachment JSON from a Forge macro iframe; `fetch()` / XHR is blocked by cross-origin isolation.
+- Ship data/config as a JavaScript attachment that calls a global callback, or embed config in the same macro that reads it.
+- Do not split hidden config and reader code across two HTML macros on Forge Cloud.
 
-```html
-<script src="widget.js"></script>
-```
+For the complete runtime rules, read `references/forge-html-macro-runtime.md`. For data loading patterns, read `references/forge-html-macro-data-loading.md`.
 
-`data.js`:
+Callback data loading uses a sibling attachment URL derived from the script URL:
 
 ```javascript
-(function (global) {
-  var payload = { rows: [] };
-  if (typeof global.__widgetDataReady === "function") {
-    global.__widgetDataReady(payload);
-  }
-}(window));
+var base = document.currentScript.src.replace(/loader\.js.*$/, "");
+var s = document.createElement("script");
+s.src = base + "data.js";
+document.head.appendChild(s);
 ```
 
-Avoid examples that require `fetch()` to Confluence attachment URLs unless the page is explicitly testing CORS behavior.
+`data.js` calls `window.__dataReady(payload)`.
+
+### Iframe Isolation
+
+Each Forge HTML macro is rendered in its own sandboxed iframe. The iframe document contains only that macro's HTML. A second macro cannot read DOM nodes from the first macro, and attempts to climb to `window.parent` or `window.top` throw `SecurityError` on cross-origin Forge sites.
+
+Working same-macro config pattern:
+
+```markdown
+::: html
+<script id="widget-config" type="application/json">
+{"title":"Release readiness","threshold":95}
+</script>
+<div id="widget"></div>
+<script>
+  var cfg = JSON.parse(document.getElementById("widget-config").textContent);
+  document.getElementById("widget").textContent = cfg.title + ": " + cfg.threshold;
+</script>
+:::
+```
 
 ## Cloud vs. Server/DC Macro Names
 

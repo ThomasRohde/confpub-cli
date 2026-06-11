@@ -84,7 +84,10 @@ class TestInstallSkill:
         assert (skill_dir / "SKILL.md").exists()
         assert (skill_dir / "README.md").exists()
         assert (skill_dir / "references" / "patterns" / "adr.md").exists()
-        assert result["total_files_written"] == 26  # 24 md + README
+        assert (skill_dir / "references" / "forge-html-macro-runtime.md").exists()
+        assert (skill_dir / "references" / "forge-html-macro-data-loading.md").exists()
+        assert (skill_dir / "references" / "patterns" / "forge-html-widget.md").exists()
+        assert result["total_files_written"] == 29
 
     def test_install_defaults_to_claude_when_no_agents(self, repo):
         result = install_skill(repo)
@@ -103,7 +106,7 @@ class TestInstallSkill:
         (repo / "CLAUDE.md").write_text("# CLAUDE")
         result = install_skill(repo, dry_run=True)
         assert result["dry_run"] is True
-        assert result["total_files_written"] == 26
+        assert result["total_files_written"] == 29
         skill_dir = repo / ".claude" / "skills" / SKILL_NAME
         assert not skill_dir.exists()
 
@@ -118,7 +121,7 @@ class TestInstallSkill:
         (repo / "CLAUDE.md").write_text("# CLAUDE")
         install_skill(repo)
         result = install_skill(repo, force=True)
-        assert result["total_files_written"] == 26
+        assert result["total_files_written"] == 29
 
     def test_install_appends_copilot_pointer(self, repo):
         (repo / ".github").mkdir()
@@ -172,6 +175,10 @@ class TestInstalledSkillContent:
         assert "CONFPUB_HTML_MACRO_NAME" in skill_md
         assert "forge-adf-extension" in skill_md
         assert "ac:adf-extension" in skill_md
+        assert "runtime data access has its own rules" in skill_md
+        assert "references/forge-html-macro-data-loading.md" in skill_md
+        assert "references/forge-html-macro-runtime.md" in skill_md
+        assert "references/patterns/forge-html-widget.md" in skill_md
 
         assert "Cloud vs. Server/DC Macro Names" in html_ref
         assert "html-macro` or `macro-html" in html_ref
@@ -198,12 +205,33 @@ class TestInstalledSkillContent:
         skill_dir = self._installed_skill_dir(repo)
 
         html_ref = (skill_dir / "references" / "syntax-html-macro.md").read_text(encoding="utf-8")
+        runtime_ref = (skill_dir / "references" / "forge-html-macro-runtime.md").read_text(encoding="utf-8")
+        data_ref = (skill_dir / "references" / "forge-html-macro-data-loading.md").read_text(encoding="utf-8")
+        widget_ref = (skill_dir / "references" / "patterns" / "forge-html-widget.md").read_text(encoding="utf-8")
         styling_ref = (skill_dir / "references" / "design-styling.md").read_text(encoding="utf-8")
 
         assert "sandboxed iframe" in html_ref
         assert "fetch()" in html_ref
         assert "CORS" in html_ref
-        assert "Data as JavaScript callback" in html_ref
+        assert "Blocked by cross-origin iframe and missing CORS headers" in html_ref
+        assert "Each Forge HTML macro is rendered in its own sandboxed iframe" in html_ref
+
+        assert "Verified Runtime Matrix" in runtime_ref
+        assert "SecurityError" in runtime_ref
+        assert "body.view" in runtime_ref
+        assert "document.getElementById(\"shared-config\"); // null" in runtime_ref
+
+        assert "`fetch()` / XHR to Confluence attachment URLs is blocked" in data_ref
+        assert "confpub attachment upload data.js --page-id PAGE_ID" in data_ref
+        assert "document.currentScript.src.replace(/loader\\.js.*$/, \"\")" in data_ref
+        assert "window.__dataReady(payload)" in data_ref
+
+        assert "Forge HTML Widget Pattern" in widget_ref
+        assert "html_macro_format: forge-adf-extension" in widget_ref
+        assert "window.__widgetDataReady" in widget_ref
+        assert "Data source:" in widget_ref
+        assert "Last action:" in widget_ref
+        assert "confpub attachment upload data.js --page-id PAGE_ID" in widget_ref
 
         assert "Attachment-Backed Interactive Widget for Cloud" in styling_ref
         assert "window.__widgetDataReady" in styling_ref
@@ -243,7 +271,7 @@ class TestInspectSkill:
         result = inspect_skill(repo)
         assert result["detected_agents"] == []
         assert result["skill_version"]
-        assert result["skill_files"] == 25
+        assert result["skill_files"] == 28
 
     def test_inspect_with_agents(self, repo):
         (repo / "CLAUDE.md").write_text("# CLAUDE")

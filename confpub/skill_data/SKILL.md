@@ -61,6 +61,8 @@ Confluence Cloud HTML macro keys depend on the installed Marketplace app. Do not
 
 Some Cloud apps, including Forge-based HTML macro apps such as Appfire "HTML for Confluence", do not use the classic `ac:structured-macro` storage shape. They store HTML as an `ac:adf-extension`; for those sites, setting only `--html-macro-name` is insufficient. Use `html_macro_format: forge-adf-extension` plus the Forge `extension-key` and `extension-id` copied from a working macro.
 
+After a Forge HTML macro publishes and renders, runtime data access has its own rules: attachment scripts execute, attachment `fetch()` is blocked, and each macro is isolated in its own iframe. For interactive widgets, read `references/forge-html-macro-runtime.md` and `references/forge-html-macro-data-loading.md`.
+
 When publishing `::: html` blocks to Cloud:
 1. Run a dry run first.
 2. Publish, then verify the rendered page, not only the storage body.
@@ -130,6 +132,7 @@ When the user asks about specific confpub features or needs detailed syntax:
 | Status lozenges, TOC, children, Jira, anchors, includes | `references/syntax-macros.md` |
 | Code blocks, math, footnotes, definition lists, task lists, front-matter | `references/syntax-formatting.md` |
 | Raw HTML embedding, custom scripts/styles | `references/syntax-html-macro.md` |
+| Forge HTML macro runtime: loading data/config, `fetch` vs callback, iframe isolation, attachment scripts | `references/forge-html-macro-data-loading.md`, `references/forge-html-macro-runtime.md` |
 
 ### Visual Design
 
@@ -139,6 +142,7 @@ When the user wants professional-looking pages, dashboards, or custom styling:
 |-------------|------|
 | Multi-column layouts, composition patterns | `references/layouts.md` |
 | KPI cards, status boards, timelines via HTML | `references/design-styling.md` |
+| Copy-paste Forge HTML widget starting point | `references/patterns/forge-html-widget.md` |
 | Container selection, nesting rules, page structure | `references/design-principles.md` |
 
 ### Trust Scoring
