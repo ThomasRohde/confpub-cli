@@ -59,11 +59,14 @@ confpub page publish page.md --space SD --dry-run
 
 Confluence Cloud HTML macro keys depend on the installed Marketplace app. Do not assume every Cloud site uses `html-macro`; observed Cloud keys include `html-macro` and `macro-html`.
 
+Some Cloud apps, including Forge-based HTML macro apps such as Appfire "HTML for Confluence", do not use the classic `ac:structured-macro` storage shape. They store HTML as an `ac:adf-extension`; for those sites, setting only `--html-macro-name` is insufficient. Use `html_macro_format: forge-adf-extension` plus the Forge `extension-key` and `extension-id` copied from a working macro.
+
 When publishing `::: html` blocks to Cloud:
 1. Run a dry run first.
 2. Publish, then verify the rendered page, not only the storage body.
 3. If the rendered page shows `unknown-macro?name=...`, inspect a working HTML macro page and republish with `--html-macro-name`.
 4. Persist known site keys with `html_macro_name` front matter, `CONFPUB_HTML_MACRO_NAME`, or `confpub config set html_macro_name`.
+5. If a recognized macro renders empty, inspect whether the working macro uses `ac:adf-extension`; if so, configure `html_macro_format`.
 
 For manifest structure, labels strategy, and advanced publishing workflows, read `references/workflow.md`.
 

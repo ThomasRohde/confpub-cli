@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -25,9 +26,38 @@ ENV_USER = "CONFPUB_USER"
 ENV_SSL_VERIFY = "CONFPUB_SSL_VERIFY"
 ENV_SPACE = "CONFPUB_SPACE"
 ENV_HTML_MACRO_NAME = "CONFPUB_HTML_MACRO_NAME"
+ENV_HTML_MACRO_FORMAT = "CONFPUB_HTML_MACRO_FORMAT"
+ENV_HTML_MACRO_FORGE_EXTENSION_KEY = "CONFPUB_HTML_MACRO_FORGE_EXTENSION_KEY"
+ENV_HTML_MACRO_FORGE_EXTENSION_ID = "CONFPUB_HTML_MACRO_FORGE_EXTENSION_ID"
+ENV_HTML_MACRO_FORGE_ENVIRONMENT = "CONFPUB_HTML_MACRO_FORGE_ENVIRONMENT"
+ENV_HTML_MACRO_FORGE_CLOUD_ID = "CONFPUB_HTML_MACRO_FORGE_CLOUD_ID"
+ENV_HTML_MACRO_FORGE_CONTEXT_IDS = "CONFPUB_HTML_MACRO_FORGE_CONTEXT_IDS"
+ENV_HTML_MACRO_FORGE_ACCOUNT_ID = "CONFPUB_HTML_MACRO_FORGE_ACCOUNT_ID"
 
 DEFAULT_HTML_MACRO_NAME_SERVER = "html"
 DEFAULT_HTML_MACRO_NAME_CLOUD = "html-macro"
+DEFAULT_HTML_MACRO_FORMAT = "classic"
+DEFAULT_HTML_MACRO_FORGE_ENVIRONMENT = "PRODUCTION"
+HTML_MACRO_FORMAT_CLASSIC = "classic"
+HTML_MACRO_FORMAT_FORGE_ADF_EXTENSION = "forge-adf-extension"
+VALID_HTML_MACRO_FORMATS = {
+    HTML_MACRO_FORMAT_CLASSIC,
+    HTML_MACRO_FORMAT_FORGE_ADF_EXTENSION,
+}
+
+
+@dataclass(frozen=True)
+class HtmlMacroSettings:
+    """Resolved settings for rendering ::: html blocks."""
+
+    name: str
+    format: str
+    forge_extension_key: str | None = None
+    forge_extension_id: str | None = None
+    forge_environment: str = DEFAULT_HTML_MACRO_FORGE_ENVIRONMENT
+    forge_cloud_id: str | None = None
+    forge_context_ids: str | None = None
+    forge_account_id: str | None = None
 
 
 class ConfigModel(BaseModel):
@@ -38,6 +68,13 @@ class ConfigModel(BaseModel):
     token: Optional[str] = None
     ssl_verify: Optional[str] = None
     html_macro_name: Optional[str] = None
+    html_macro_format: Optional[str] = None
+    html_macro_forge_extension_key: Optional[str] = None
+    html_macro_forge_extension_id: Optional[str] = None
+    html_macro_forge_environment: Optional[str] = None
+    html_macro_forge_cloud_id: Optional[str] = None
+    html_macro_forge_context_ids: Optional[str] = None
+    html_macro_forge_account_id: Optional[str] = None
 
 
 class ResolvedConfig:
@@ -51,6 +88,13 @@ class ResolvedConfig:
         token_source: str | None = None,
         ssl_verify: bool | str = False,
         html_macro_name: str | None = None,
+        html_macro_format: str | None = None,
+        html_macro_forge_extension_key: str | None = None,
+        html_macro_forge_extension_id: str | None = None,
+        html_macro_forge_environment: str | None = None,
+        html_macro_forge_cloud_id: str | None = None,
+        html_macro_forge_context_ids: str | None = None,
+        html_macro_forge_account_id: str | None = None,
     ) -> None:
         self.base_url = base_url
         self.user = user
@@ -58,6 +102,13 @@ class ResolvedConfig:
         self.token_source = token_source
         self.ssl_verify = ssl_verify
         self.html_macro_name = html_macro_name
+        self.html_macro_format = html_macro_format
+        self.html_macro_forge_extension_key = html_macro_forge_extension_key
+        self.html_macro_forge_extension_id = html_macro_forge_extension_id
+        self.html_macro_forge_environment = html_macro_forge_environment
+        self.html_macro_forge_cloud_id = html_macro_forge_cloud_id
+        self.html_macro_forge_context_ids = html_macro_forge_context_ids
+        self.html_macro_forge_account_id = html_macro_forge_account_id
 
     @property
     def is_cloud(self) -> bool:
@@ -119,6 +170,14 @@ class ResolvedConfig:
             "is_cloud": self.is_cloud,
             "html_macro_name": self.html_macro_name,
             "effective_html_macro_name": resolve_html_macro_name(self),
+            "html_macro_format": self.html_macro_format,
+            "effective_html_macro_format": resolve_html_macro_format(self),
+            "html_macro_forge_extension_key": self.html_macro_forge_extension_key,
+            "html_macro_forge_extension_id": self.html_macro_forge_extension_id,
+            "html_macro_forge_environment": self.html_macro_forge_environment,
+            "html_macro_forge_cloud_id": self.html_macro_forge_cloud_id,
+            "html_macro_forge_context_ids": self.html_macro_forge_context_ids,
+            "html_macro_forge_account_id": self.html_macro_forge_account_id,
         }
 
 
@@ -192,6 +251,103 @@ def resolve_html_macro_name(config: Any, override: str | None = None) -> str:
     return default_html_macro_name(bool(getattr(config, "is_cloud", False)))
 
 
+def resolve_html_macro_format(config: Any, override: str | None = None) -> str:
+    """Resolve the storage format used for ::: html blocks."""
+    override_value = _normalize_optional_string(override)
+    configured = getattr(config, "html_macro_format", None)
+    value = override_value or (
+        _normalize_optional_string(configured) if isinstance(configured, str) else None
+    ) or DEFAULT_HTML_MACRO_FORMAT
+    normalized = value.lower()
+    if normalized not in VALID_HTML_MACRO_FORMATS:
+        from confpub.errors import ERR_VALIDATION_REQUIRED, validation_error
+        raise validation_error(
+            ERR_VALIDATION_REQUIRED,
+            f"Unknown html_macro_format: {value}. Valid values: classic, forge-adf-extension",
+            value=value,
+            valid_values=sorted(VALID_HTML_MACRO_FORMATS),
+        )
+    return normalized
+
+
+def _resolve_configured_string(config: Any, attr: str, override: str | None = None) -> str | None:
+    override_value = _normalize_optional_string(override)
+    if override_value:
+        return override_value
+    configured = getattr(config, attr, None)
+    if isinstance(configured, str):
+        return _normalize_optional_string(configured)
+    return None
+
+
+def resolve_html_macro_settings(
+    config: Any,
+    *,
+    name_override: str | None = None,
+    format_override: str | None = None,
+    forge_extension_key_override: str | None = None,
+    forge_extension_id_override: str | None = None,
+    forge_environment_override: str | None = None,
+    forge_cloud_id_override: str | None = None,
+    forge_context_ids_override: str | None = None,
+    forge_account_id_override: str | None = None,
+) -> HtmlMacroSettings:
+    """Resolve and validate all HTML macro rendering settings."""
+    name = resolve_html_macro_name(config, name_override)
+    macro_format = resolve_html_macro_format(config, format_override)
+    forge_extension_key = _resolve_configured_string(
+        config, "html_macro_forge_extension_key", forge_extension_key_override,
+    )
+    forge_extension_id = _resolve_configured_string(
+        config, "html_macro_forge_extension_id", forge_extension_id_override,
+    )
+    forge_environment = (
+        _resolve_configured_string(
+            config, "html_macro_forge_environment", forge_environment_override,
+        )
+        or DEFAULT_HTML_MACRO_FORGE_ENVIRONMENT
+    )
+    forge_cloud_id = _resolve_configured_string(
+        config, "html_macro_forge_cloud_id", forge_cloud_id_override,
+    )
+    forge_context_ids = _resolve_configured_string(
+        config, "html_macro_forge_context_ids", forge_context_ids_override,
+    )
+    forge_account_id = _resolve_configured_string(
+        config, "html_macro_forge_account_id", forge_account_id_override,
+    )
+
+    if macro_format == HTML_MACRO_FORMAT_FORGE_ADF_EXTENSION and (
+        not forge_extension_key or not forge_extension_id
+    ):
+        from confpub.errors import ERR_VALIDATION_REQUIRED, validation_error
+        missing = []
+        if not forge_extension_key:
+            missing.append("html_macro_forge_extension_key")
+        if not forge_extension_id:
+            missing.append("html_macro_forge_extension_id")
+        raise validation_error(
+            ERR_VALIDATION_REQUIRED,
+            "Forge HTML macro format requires extension key and extension ID from a working macro",
+            missing=missing,
+            how_to_find=(
+                "Inspect a page with a working Forge HTML macro using "
+                "confpub page inspect --page-id <id> --raw and copy extension-key and extension-id"
+            ),
+        )
+
+    return HtmlMacroSettings(
+        name=name,
+        format=macro_format,
+        forge_extension_key=forge_extension_key,
+        forge_extension_id=forge_extension_id,
+        forge_environment=forge_environment,
+        forge_cloud_id=forge_cloud_id,
+        forge_context_ids=forge_context_ids,
+        forge_account_id=forge_account_id,
+    )
+
+
 def load_config(
     cli_url: str | None = None,
     cli_user: str | None = None,
@@ -217,6 +373,34 @@ def load_config(
         _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_NAME))
         or _normalize_optional_string(file_cfg.html_macro_name)
     )
+    html_macro_format = (
+        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORMAT))
+        or _normalize_optional_string(file_cfg.html_macro_format)
+    )
+    html_macro_forge_extension_key = (
+        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORGE_EXTENSION_KEY))
+        or _normalize_optional_string(file_cfg.html_macro_forge_extension_key)
+    )
+    html_macro_forge_extension_id = (
+        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORGE_EXTENSION_ID))
+        or _normalize_optional_string(file_cfg.html_macro_forge_extension_id)
+    )
+    html_macro_forge_environment = (
+        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORGE_ENVIRONMENT))
+        or _normalize_optional_string(file_cfg.html_macro_forge_environment)
+    )
+    html_macro_forge_cloud_id = (
+        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORGE_CLOUD_ID))
+        or _normalize_optional_string(file_cfg.html_macro_forge_cloud_id)
+    )
+    html_macro_forge_context_ids = (
+        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORGE_CONTEXT_IDS))
+        or _normalize_optional_string(file_cfg.html_macro_forge_context_ids)
+    )
+    html_macro_forge_account_id = (
+        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORGE_ACCOUNT_ID))
+        or _normalize_optional_string(file_cfg.html_macro_forge_account_id)
+    )
 
     # Determine source
     token_source = None
@@ -241,6 +425,13 @@ def load_config(
         token_source=token_source,
         ssl_verify=ssl_verify,
         html_macro_name=html_macro_name,
+        html_macro_format=html_macro_format,
+        html_macro_forge_extension_key=html_macro_forge_extension_key,
+        html_macro_forge_extension_id=html_macro_forge_extension_id,
+        html_macro_forge_environment=html_macro_forge_environment,
+        html_macro_forge_cloud_id=html_macro_forge_cloud_id,
+        html_macro_forge_context_ids=html_macro_forge_context_ids,
+        html_macro_forge_account_id=html_macro_forge_account_id,
     )
 
 
@@ -259,11 +450,30 @@ def set_config_value(key: str, value: str) -> None:
         cfg.ssl_verify = value
     elif key == "html_macro_name":
         cfg.html_macro_name = value
+    elif key == "html_macro_format":
+        cfg.html_macro_format = value
+    elif key == "html_macro_forge_extension_key":
+        cfg.html_macro_forge_extension_key = value
+    elif key == "html_macro_forge_extension_id":
+        cfg.html_macro_forge_extension_id = value
+    elif key == "html_macro_forge_environment":
+        cfg.html_macro_forge_environment = value
+    elif key == "html_macro_forge_cloud_id":
+        cfg.html_macro_forge_cloud_id = value
+    elif key == "html_macro_forge_context_ids":
+        cfg.html_macro_forge_context_ids = value
+    elif key == "html_macro_forge_account_id":
+        cfg.html_macro_forge_account_id = value
     else:
         from confpub.errors import ERR_VALIDATION_REQUIRED, validation_error
         raise validation_error(
             ERR_VALIDATION_REQUIRED,
-            f"Unknown config key: {key}. Valid keys: base_url, user, token, ssl_verify, html_macro_name",
+            "Unknown config key: "
+            f"{key}. Valid keys: base_url, user, token, ssl_verify, html_macro_name, "
+            "html_macro_format, html_macro_forge_extension_key, "
+            "html_macro_forge_extension_id, html_macro_forge_environment, "
+            "html_macro_forge_cloud_id, html_macro_forge_context_ids, "
+            "html_macro_forge_account_id",
         )
 
     CONFIG_FILE.write_text(json.dumps(cfg.model_dump(exclude_none=True), indent=2), encoding="utf-8")

@@ -1,8 +1,8 @@
 """Custom markdown-it-py plugin for ::: html blocks.
 
 Recognises fenced blocks starting with `::: html` (case-insensitive) and
-emits ``html_macro`` tokens that the ConfluenceRenderer wraps in a
-Confluence HTML macro (``<ac:structured-macro ac:name="html">``).
+emits ``html_macro`` tokens that the ConfluenceRenderer wraps in the
+configured Confluence HTML macro storage shape.
 
 Block-level only — inline HTML macro syntax is a non-goal.
 """

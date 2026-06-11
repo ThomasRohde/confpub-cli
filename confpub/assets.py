@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import glob
 import re
+from html import escape as html_escape
+from html import unescape as html_unescape
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +54,10 @@ _LINK_HREF_RE = re.compile(r'<link\b[^>]*\bhref=["\']([^"\']+)["\']', re.IGNOREC
 
 # Regex to find local resource references in CDATA blocks (for rewriting)
 _CDATA_BLOCK_RE = re.compile(r"(<!\[CDATA\[)(.*?)(\]\]>)", re.DOTALL)
+_ADF_BODY_CONTENT_RE = re.compile(
+    r'(<ac:adf-parameter key="__body-content">)(.*?)(</ac:adf-parameter>)',
+    re.DOTALL,
+)
 
 
 def _is_local_path(src: str) -> bool:
@@ -215,10 +221,11 @@ def rewrite_html_macro_urls(
     is_cloud: bool,
     page_id: str,
 ) -> str:
-    """Rewrite local file references inside HTML macro CDATA blocks to attachment URLs.
+    """Rewrite local file references inside HTML macro bodies to attachment URLs.
 
     Transforms script src and link href pointing to local files into full
-    Confluence attachment download URLs.
+    Confluence attachment download URLs. Handles classic HTML macro CDATA
+    bodies and Forge ADF ``__body-content`` values.
     """
     if not uploaded_assets:
         return storage_format
@@ -236,11 +243,7 @@ def rewrite_html_macro_urls(
             asset = by_filename.get(Path(src).name)
         return asset
 
-    def _rewrite_cdata(match: re.Match) -> str:
-        prefix = match.group(1)  # <![CDATA[
-        content = match.group(2)
-        suffix = match.group(3)  # ]]>
-
+    def _rewrite_refs(content: str) -> str:
         def _rewrite_attr(attr_match: re.Match) -> str:
             full = attr_match.group(0)
             src = attr_match.group(1)
@@ -253,10 +256,23 @@ def rewrite_html_macro_urls(
             return full
 
         content = _SCRIPT_SRC_RE.sub(_rewrite_attr, content)
-        content = _LINK_HREF_RE.sub(_rewrite_attr, content)
+        return _LINK_HREF_RE.sub(_rewrite_attr, content)
+
+    def _rewrite_cdata(match: re.Match) -> str:
+        prefix = match.group(1)  # <![CDATA[
+        content = _rewrite_refs(match.group(2))
+        suffix = match.group(3)  # ]]>
         return prefix + content + suffix
 
-    return _CDATA_BLOCK_RE.sub(_rewrite_cdata, storage_format)
+    def _rewrite_adf_body(match: re.Match) -> str:
+        prefix = match.group(1)
+        content = html_unescape(match.group(2))
+        content = _rewrite_refs(content)
+        suffix = match.group(3)
+        return prefix + html_escape(content, quote=False) + suffix
+
+    storage_format = _CDATA_BLOCK_RE.sub(_rewrite_cdata, storage_format)
+    return _ADF_BODY_CONTENT_RE.sub(_rewrite_adf_body, storage_format)
 
 
 def upload_assets(

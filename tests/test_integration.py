@@ -498,6 +498,9 @@ class TestPagePublishLabelFlag:
         result = runner.invoke(app, ["page", "publish", "--help"])
         assert result.exit_code == 0
         assert "--label" in result.output
+        assert "--html-macro-format" in result.output
+        assert "extension-key" in result.output
+        assert "extension-id" in result.output
 
 
 class TestCommentValidation:

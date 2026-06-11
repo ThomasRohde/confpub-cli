@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from html import escape
 from typing import Any
 
@@ -27,6 +28,9 @@ from mdit_py_plugins.container import container_plugin
 from confpub.html_macro_plugin import html_macro_plugin
 from confpub.macro_plugin import confluence_macro_plugin
 
+HTML_MACRO_FORMAT_CLASSIC = "classic"
+HTML_MACRO_FORMAT_FORGE_ADF_EXTENSION = "forge-adf-extension"
+
 # Admonition types mapping: GitHub [!TYPE] → Confluence macro name
 ADMONITION_MAP: dict[str, str] = {
     "NOTE": "info",
@@ -43,12 +47,30 @@ _ADMONITION_RE = re.compile(r"^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$", r
 class ConfluenceRenderer:
     """Renders markdown-it-py tokens into Confluence Storage Format XHTML."""
 
-    def __init__(self, *, html_macro_name: str = "html") -> None:
+    def __init__(
+        self,
+        *,
+        html_macro_name: str = "html",
+        html_macro_format: str = HTML_MACRO_FORMAT_CLASSIC,
+        html_macro_forge_extension_key: str | None = None,
+        html_macro_forge_extension_id: str | None = None,
+        html_macro_forge_environment: str = "PRODUCTION",
+        html_macro_forge_cloud_id: str | None = None,
+        html_macro_forge_context_ids: str | None = None,
+        html_macro_forge_account_id: str | None = None,
+    ) -> None:
         self._output: list[str] = []
         self._list_stack: list[str] = []  # track nested ol/ul ("ol", "ul", "task-list")
         self._task_id: int = 0  # incrementing counter for Confluence task IDs
         self._footnote_refs: dict[int, int] = {}  # meta.id → display number
         self._html_macro_name = html_macro_name
+        self._html_macro_format = html_macro_format
+        self._html_macro_forge_extension_key = html_macro_forge_extension_key
+        self._html_macro_forge_extension_id = html_macro_forge_extension_id
+        self._html_macro_forge_environment = html_macro_forge_environment
+        self._html_macro_forge_cloud_id = html_macro_forge_cloud_id
+        self._html_macro_forge_context_ids = html_macro_forge_context_ids
+        self._html_macro_forge_account_id = html_macro_forge_account_id
 
     def render(self, tokens: list[Token], options: dict[str, Any], env: dict[str, Any]) -> str:
         """Render a list of tokens to Confluence Storage Format."""
@@ -401,6 +423,16 @@ class ConfluenceRenderer:
 
     def _render_html_macro(self, tokens: list[Token], idx: int, _o: Any, _e: Any) -> int:
         content = tokens[idx].content
+        if self._html_macro_format == HTML_MACRO_FORMAT_FORGE_ADF_EXTENSION:
+            self._output.append(self._render_forge_html_macro(content, idx))
+            return idx + 1
+
+        if self._html_macro_format != HTML_MACRO_FORMAT_CLASSIC:
+            raise ValueError(
+                "Unknown html_macro_format: "
+                f"{self._html_macro_format}. Valid values: classic, forge-adf-extension"
+            )
+
         macro_name = self._html_macro_name
         self._output.append(
             f'<ac:structured-macro ac:name="{macro_name}">'
@@ -408,6 +440,60 @@ class ConfluenceRenderer:
             "</ac:structured-macro>"
         )
         return idx + 1
+
+    def _render_forge_html_macro(self, content: str, token_index: int) -> str:
+        """Render a Forge HTML macro as Confluence's ADF extension storage."""
+        extension_key = self._html_macro_forge_extension_key
+        extension_id = self._html_macro_forge_extension_id
+        if not extension_key or not extension_id:
+            raise ValueError(
+                "forge-adf-extension HTML macro format requires "
+                "html_macro_forge_extension_key and html_macro_forge_extension_id"
+            )
+
+        local_id = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"confpub-html-macro:{token_index}:{extension_key}:{content}",
+        )
+        escaped_body = escape(content, quote=False)
+        escaped_extension_key = escape(extension_key, quote=False)
+        escaped_extension_id = escape(extension_id, quote=False)
+        escaped_environment = escape(self._html_macro_forge_environment, quote=False)
+        optional_params = ""
+        for key, value in (
+            ("cloud-id", self._html_macro_forge_cloud_id),
+            ("context-ids", self._html_macro_forge_context_ids),
+            ("account-id", self._html_macro_forge_account_id),
+        ):
+            if value:
+                optional_params += (
+                    f'<ac:adf-parameter key="{key}">{escape(value, quote=False)}</ac:adf-parameter>'
+                )
+
+        return (
+            "<ac:adf-extension>"
+            '<ac:adf-node type="extension">'
+            f'<ac:adf-attribute key="extension-key">{escaped_extension_key}</ac:adf-attribute>'
+            '<ac:adf-attribute key="extension-type">com.atlassian.ecosystem</ac:adf-attribute>'
+            '<ac:adf-attribute key="parameters">'
+            f'<ac:adf-parameter key="extension-id">{escaped_extension_id}</ac:adf-parameter>'
+            f'<ac:adf-parameter key="forge-environment">{escaped_environment}</ac:adf-parameter>'
+            f"{optional_params}"
+            '<ac:adf-parameter key="guest-params">'
+            '<ac:adf-parameter key="syntax">HTML</ac:adf-parameter>'
+            '<ac:adf-parameter key="source-type">MacroBody</ac:adf-parameter>'
+            f'<ac:adf-parameter key="__body-content">{escaped_body}</ac:adf-parameter>'
+            '<ac:adf-parameter key="attachment-page-id" />'
+            '<ac:adf-parameter key="attachment-id" />'
+            '<ac:adf-parameter key="url" />'
+            "</ac:adf-parameter>"
+            "</ac:adf-attribute>"
+            '<ac:adf-attribute key="text">HTML</ac:adf-attribute>'
+            f'<ac:adf-attribute key="local-id">{local_id}</ac:adf-attribute>'
+            "</ac:adf-node>"
+            "<ac:adf-fallback><p>HTML</p></ac:adf-fallback>"
+            "</ac:adf-extension>"
+        )
 
     def _inline_html_inline(self, token: Token) -> None:
         # Suppress task-list checkboxes (already handled by _render_list_item_open)
@@ -763,20 +849,43 @@ def _wrap_non_layout_content(html: str) -> str:
     return "".join(parts)
 
 
-def convert_markdown(md_text: str, *, html_macro_name: str = "html") -> str:
+def convert_markdown(
+    md_text: str,
+    *,
+    html_macro_name: str = "html",
+    html_macro_format: str = HTML_MACRO_FORMAT_CLASSIC,
+    html_macro_forge_extension_key: str | None = None,
+    html_macro_forge_extension_id: str | None = None,
+    html_macro_forge_environment: str = "PRODUCTION",
+    html_macro_forge_cloud_id: str | None = None,
+    html_macro_forge_context_ids: str | None = None,
+    html_macro_forge_account_id: str | None = None,
+) -> str:
     """Convert Markdown text to Confluence Storage Format.
 
     Args:
         md_text: Markdown source text.
         html_macro_name: Name for the HTML macro. The CLI resolves platform
             defaults and config before calling this pure converter.
+        html_macro_format: Storage format for ::: html blocks. Use ``classic``
+            for ac:structured-macro output or ``forge-adf-extension`` for
+            Forge app macros that store the body in ADF guest params.
 
     Returns:
         Confluence Storage Format XHTML string.
     """
     parser = _create_parser()
     tokens = parser.parse(md_text)
-    renderer = ConfluenceRenderer(html_macro_name=html_macro_name)
+    renderer = ConfluenceRenderer(
+        html_macro_name=html_macro_name,
+        html_macro_format=html_macro_format,
+        html_macro_forge_extension_key=html_macro_forge_extension_key,
+        html_macro_forge_extension_id=html_macro_forge_extension_id,
+        html_macro_forge_environment=html_macro_forge_environment,
+        html_macro_forge_cloud_id=html_macro_forge_cloud_id,
+        html_macro_forge_context_ids=html_macro_forge_context_ids,
+        html_macro_forge_account_id=html_macro_forge_account_id,
+    )
     html = renderer.render(tokens, {}, {})
     return _wrap_non_layout_content(html)
 

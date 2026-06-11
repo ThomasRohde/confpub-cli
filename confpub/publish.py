@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from confpub.assets import discover_assets, discover_html_macro_warnings, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
-from confpub.config import load_config, resolve_html_macro_name
+from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, fingerprint_content
 from confpub.errors import (
@@ -58,6 +58,13 @@ def publish_page(
     progress_callback: Any = None,
     labels: list[str] | None = None,
     html_macro_name: str | None = None,
+    html_macro_format: str | None = None,
+    html_macro_forge_extension_key: str | None = None,
+    html_macro_forge_extension_id: str | None = None,
+    html_macro_forge_environment: str | None = None,
+    html_macro_forge_cloud_id: str | None = None,
+    html_macro_forge_context_ids: str | None = None,
+    html_macro_forge_account_id: str | None = None,
 ) -> dict[str, Any]:
     """Publish a single Markdown file to Confluence.
 
@@ -82,9 +89,29 @@ def publish_page(
     # Build client (needed for is_cloud detection)
     config = load_config()
 
-    # Resolve html_macro_name: explicit/front-matter > config/env > platform default.
-    effective_html_macro = resolve_html_macro_name(config, html_macro_name)
-    storage = convert_markdown(md_text, html_macro_name=effective_html_macro)
+    # Resolve HTML macro settings: explicit/front-matter > config/env > platform default.
+    html_macro_settings = resolve_html_macro_settings(
+        config,
+        name_override=html_macro_name,
+        format_override=html_macro_format,
+        forge_extension_key_override=html_macro_forge_extension_key,
+        forge_extension_id_override=html_macro_forge_extension_id,
+        forge_environment_override=html_macro_forge_environment,
+        forge_cloud_id_override=html_macro_forge_cloud_id,
+        forge_context_ids_override=html_macro_forge_context_ids,
+        forge_account_id_override=html_macro_forge_account_id,
+    )
+    storage = convert_markdown(
+        md_text,
+        html_macro_name=html_macro_settings.name,
+        html_macro_format=html_macro_settings.format,
+        html_macro_forge_extension_key=html_macro_settings.forge_extension_key,
+        html_macro_forge_extension_id=html_macro_settings.forge_extension_id,
+        html_macro_forge_environment=html_macro_settings.forge_environment,
+        html_macro_forge_cloud_id=html_macro_settings.forge_cloud_id,
+        html_macro_forge_context_ids=html_macro_settings.forge_context_ids,
+        html_macro_forge_account_id=html_macro_settings.forge_account_id,
+    )
     local_fingerprint = fingerprint_content(storage)
     client = ConfluenceClient(config)
 

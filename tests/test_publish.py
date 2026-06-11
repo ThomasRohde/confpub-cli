@@ -214,6 +214,42 @@ class TestPublishCreate:
 
     @patch("confpub.publish.load_config")
     @patch("confpub.publish.ConfluenceClient")
+    def test_forge_html_macro_format(self, MockClient, mock_config, tmp_path, mock_client):
+        md_file = tmp_path / "html.md"
+        md_file.write_text('::: html\n<div id="out">waiting</div>\n:::')
+
+        def get_page_side_effect(space, title):
+            if title == "Root":
+                return {"id": "root_1"}
+            return None
+
+        mock_client.get_page.side_effect = get_page_side_effect
+        MockClient.return_value = mock_client
+        mock_config.return_value = ResolvedConfig(base_url="https://test.atlassian.net/wiki")
+
+        publish_page(
+            file=str(md_file),
+            space="DEV",
+            parent="Root",
+            html_macro_name="macro-html",
+            html_macro_format="forge-adf-extension",
+            html_macro_forge_extension_key="app/static/macro-html",
+            html_macro_forge_extension_id="ari:cloud:ecosystem::extension/app/static/macro-html",
+            html_macro_forge_cloud_id="cloud-123",
+            html_macro_forge_context_ids="ari:cloud:confluence:site/cloud-123",
+            html_macro_forge_account_id="account-123",
+        )
+
+        storage = mock_client.create_page.call_args[0][2]
+        assert "<ac:adf-extension>" in storage
+        assert '<ac:adf-attribute key="extension-key">app/static/macro-html</ac:adf-attribute>' in storage
+        assert '<ac:adf-parameter key="cloud-id">cloud-123</ac:adf-parameter>' in storage
+        assert '<ac:adf-parameter key="account-id">account-123</ac:adf-parameter>' in storage
+        assert '<ac:adf-parameter key="source-type">MacroBody</ac:adf-parameter>' in storage
+        assert '&lt;div id="out"&gt;waiting&lt;/div&gt;' in storage
+
+    @patch("confpub.publish.load_config")
+    @patch("confpub.publish.ConfluenceClient")
     def test_updates_lockfile(self, MockClient, mock_config, source_dir, mock_client):
         def get_page_side_effect(space, title):
             if title == "Root":

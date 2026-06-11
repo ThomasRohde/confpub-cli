@@ -93,6 +93,59 @@ class TestHtmlMacroForward:
         result = convert_markdown(md)
         assert "<script>alert('hi');</script>" in result
 
+    def test_forge_adf_extension_macro(self):
+        md = '::: html\n<div id="out">waiting</div><script src="widget.js"></script>\n:::'
+        result = convert_markdown(
+            md,
+            html_macro_name="macro-html",
+            html_macro_format="forge-adf-extension",
+            html_macro_forge_extension_key="7dc8a3ac/app/static/macro-html",
+            html_macro_forge_extension_id="ari:cloud:ecosystem::extension/7dc8a3ac/static/macro-html",
+            html_macro_forge_cloud_id="cloud-123",
+            html_macro_forge_context_ids="ari:cloud:confluence:site/cloud-123",
+            html_macro_forge_account_id="account-123",
+        )
+
+        assert "<ac:adf-extension>" in result
+        assert '<ac:adf-node type="extension">' in result
+        assert '<ac:structured-macro ac:name="macro-html">' not in result
+        assert "<ac:plain-text-body>" not in result
+        assert '<ac:adf-attribute key="extension-key">7dc8a3ac/app/static/macro-html</ac:adf-attribute>' in result
+        assert (
+            '<ac:adf-parameter key="extension-id">'
+            "ari:cloud:ecosystem::extension/7dc8a3ac/static/macro-html"
+            "</ac:adf-parameter>"
+        ) in result
+        assert '<ac:adf-parameter key="cloud-id">cloud-123</ac:adf-parameter>' in result
+        assert (
+            '<ac:adf-parameter key="context-ids">'
+            "ari:cloud:confluence:site/cloud-123"
+            "</ac:adf-parameter>"
+        ) in result
+        assert '<ac:adf-parameter key="account-id">account-123</ac:adf-parameter>' in result
+        assert '<ac:adf-parameter key="source-type">MacroBody</ac:adf-parameter>' in result
+        assert (
+            '<ac:adf-parameter key="__body-content">'
+            '&lt;div id="out"&gt;waiting&lt;/div&gt;&lt;script src="widget.js"&gt;&lt;/script&gt;'
+            "</ac:adf-parameter>"
+        ) in result
+        assert '<ac:adf-attribute key="local-id">' in result
+
+    def test_forge_adf_extension_macro_local_id_is_stable(self):
+        kwargs = {
+            "html_macro_format": "forge-adf-extension",
+            "html_macro_forge_extension_key": "app/static/macro-html",
+            "html_macro_forge_extension_id": "ari:cloud:ecosystem::extension/app/static/macro-html",
+        }
+        md = "::: html\n<b>bold</b>\n:::"
+
+        assert convert_markdown(md, **kwargs) == convert_markdown(md, **kwargs)
+
+    def test_forge_adf_extension_requires_identifiers(self):
+        md = "::: html\n<b>bold</b>\n:::"
+        with pytest.raises(ValueError):
+            convert_markdown(md, html_macro_format="forge-adf-extension")
+
 
 # ---------------------------------------------------------------------------
 # Reverse conversion tests
@@ -132,6 +185,27 @@ class TestHtmlMacroReverse:
         result = convert_storage_to_markdown(storage)
         assert "::: html" in result.markdown
         assert "<b>bold</b>" in result.markdown
+        assert result.unknown_macros == []
+
+    def test_forge_adf_extension_html_macro(self):
+        storage = (
+            "<ac:adf-extension>"
+            '<ac:adf-node type="extension">'
+            '<ac:adf-attribute key="extension-key">7dc8a3ac/app/static/macro-html</ac:adf-attribute>'
+            '<ac:adf-attribute key="parameters">'
+            '<ac:adf-parameter key="guest-params">'
+            '<ac:adf-parameter key="__body-content">'
+            '&lt;div id="out"&gt;waiting&lt;/div&gt;&lt;script src="widget.js"&gt;&lt;/script&gt;'
+            "</ac:adf-parameter>"
+            "</ac:adf-parameter>"
+            "</ac:adf-attribute>"
+            "</ac:adf-node>"
+            "</ac:adf-extension>"
+        )
+        result = convert_storage_to_markdown(storage)
+        assert "::: html" in result.markdown
+        assert '<div id="out">waiting</div>' in result.markdown
+        assert '<script src="widget.js"></script>' in result.markdown
         assert result.unknown_macros == []
 
 

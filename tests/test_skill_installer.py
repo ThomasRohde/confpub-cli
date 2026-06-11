@@ -170,14 +170,29 @@ class TestInstalledSkillContent:
         assert "html-macro" in skill_md
         assert "macro-html" in skill_md
         assert "CONFPUB_HTML_MACRO_NAME" in skill_md
+        assert "forge-adf-extension" in skill_md
+        assert "ac:adf-extension" in skill_md
 
         assert "Cloud vs. Server/DC Macro Names" in html_ref
         assert "html-macro` or `macro-html" in html_ref
+        assert "Cloud Forge app" in html_ref
         assert "confpub page publish page.md --html-macro-name macro-html" in html_ref
+        assert "--html-macro-format forge-adf-extension" in html_ref
         assert "confpub page inspect --page-id PAGE_ID --raw" in html_ref
         assert '<ac:structured-macro ac:name="...">' in html_ref
+        assert '<ac:adf-extension>' in html_ref
+        assert "guest-params" in html_ref
+        assert "__body-content" in html_ref
         assert "confpub config set html_macro_name macro-html" in html_ref
+        assert "confpub config set html_macro_format forge-adf-extension" in html_ref
+        assert "html_macro_forge_extension_key" in html_ref
+        assert "html_macro_forge_extension_id" in html_ref
+        assert "html_macro_forge_cloud_id" in html_ref
+        assert "html_macro_forge_context_ids" in html_ref
+        assert "html_macro_forge_account_id" in html_ref
         assert "CONFPUB_HTML_MACRO_NAME=macro-html" in html_ref
+        assert "body.view" in html_ref
+        assert "browser rendered view" in html_ref
 
     def test_cloud_sandbox_and_widget_guidance_installed(self, repo):
         skill_dir = self._installed_skill_dir(repo)

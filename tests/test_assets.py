@@ -8,6 +8,7 @@ from confpub.assets import (
     UploadedAsset,
     discover_assets,
     rewrite_image_urls,
+    rewrite_html_macro_urls,
     upload_assets,
 )
 
@@ -91,6 +92,49 @@ class TestRewriteImageUrls:
         ]
         result = rewrite_image_urls(storage, uploaded)
         assert result.count("ri:attachment") == 2
+
+
+class TestRewriteHtmlMacroUrls:
+    def test_rewrites_classic_cdata_script_src(self):
+        storage = (
+            '<ac:structured-macro ac:name="html">'
+            '<ac:plain-text-body><![CDATA[<script src="widget.js"></script>]]></ac:plain-text-body>'
+            "</ac:structured-macro>"
+        )
+        uploaded = [UploadedAsset(source_path="widget.js", filename="widget.js")]
+
+        result = rewrite_html_macro_urls(
+            storage,
+            uploaded,
+            base_url="https://example.atlassian.net",
+            is_cloud=True,
+            page_id="123",
+        )
+
+        assert 'src="https://example.atlassian.net/wiki/download/attachments/123/widget.js"' in result
+
+    def test_rewrites_forge_adf_body_script_src(self):
+        storage = (
+            "<ac:adf-extension>"
+            '<ac:adf-parameter key="__body-content">'
+            '&lt;script src="widget.js"&gt;&lt;/script&gt;'
+            "</ac:adf-parameter>"
+            "</ac:adf-extension>"
+        )
+        uploaded = [UploadedAsset(source_path="widget.js", filename="widget.js")]
+
+        result = rewrite_html_macro_urls(
+            storage,
+            uploaded,
+            base_url="https://example.atlassian.net",
+            is_cloud=True,
+            page_id="123",
+        )
+
+        assert (
+            '&lt;script src="https://example.atlassian.net/wiki/download/attachments/123/widget.js"&gt;'
+            "&lt;/script&gt;"
+        ) in result
 
 
 class TestUploadAssets:

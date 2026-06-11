@@ -26,6 +26,13 @@ class FrontMatterData:
     labels: list[str] = field(default_factory=list)
     page_id: str | None = None
     html_macro_name: str | None = None
+    html_macro_format: str | None = None
+    html_macro_forge_extension_key: str | None = None
+    html_macro_forge_extension_id: str | None = None
+    html_macro_forge_environment: str | None = None
+    html_macro_forge_cloud_id: str | None = None
+    html_macro_forge_context_ids: str | None = None
+    html_macro_forge_account_id: str | None = None
 
     def to_yaml_block(self) -> str:
         """Serialize to a YAML front matter block (``--- ... ---``)."""
@@ -42,6 +49,20 @@ class FrontMatterData:
             data["labels"] = self.labels
         if self.html_macro_name is not None:
             data["html_macro_name"] = self.html_macro_name
+        if self.html_macro_format is not None:
+            data["html_macro_format"] = self.html_macro_format
+        if self.html_macro_forge_extension_key is not None:
+            data["html_macro_forge_extension_key"] = self.html_macro_forge_extension_key
+        if self.html_macro_forge_extension_id is not None:
+            data["html_macro_forge_extension_id"] = self.html_macro_forge_extension_id
+        if self.html_macro_forge_environment is not None:
+            data["html_macro_forge_environment"] = self.html_macro_forge_environment
+        if self.html_macro_forge_cloud_id is not None:
+            data["html_macro_forge_cloud_id"] = self.html_macro_forge_cloud_id
+        if self.html_macro_forge_context_ids is not None:
+            data["html_macro_forge_context_ids"] = self.html_macro_forge_context_ids
+        if self.html_macro_forge_account_id is not None:
+            data["html_macro_forge_account_id"] = self.html_macro_forge_account_id
         yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
         return f"---\n{yaml_str}---\n\n"
 
@@ -112,6 +133,13 @@ def parse_front_matter(md_text: str) -> FrontMatterData | None:
             )
 
     html_macro_name = _validate_string(raw, "html_macro_name")
+    html_macro_format = _validate_string(raw, "html_macro_format")
+    html_macro_forge_extension_key = _validate_string(raw, "html_macro_forge_extension_key")
+    html_macro_forge_extension_id = _validate_string(raw, "html_macro_forge_extension_id")
+    html_macro_forge_environment = _validate_string(raw, "html_macro_forge_environment")
+    html_macro_forge_cloud_id = _validate_string(raw, "html_macro_forge_cloud_id")
+    html_macro_forge_context_ids = _validate_string(raw, "html_macro_forge_context_ids")
+    html_macro_forge_account_id = _validate_string(raw, "html_macro_forge_account_id")
 
     return FrontMatterData(
         title=title,
@@ -120,4 +148,11 @@ def parse_front_matter(md_text: str) -> FrontMatterData | None:
         labels=labels,
         page_id=page_id,
         html_macro_name=html_macro_name,
+        html_macro_format=html_macro_format,
+        html_macro_forge_extension_key=html_macro_forge_extension_key,
+        html_macro_forge_extension_id=html_macro_forge_extension_id,
+        html_macro_forge_environment=html_macro_forge_environment,
+        html_macro_forge_cloud_id=html_macro_forge_cloud_id,
+        html_macro_forge_context_ids=html_macro_forge_context_ids,
+        html_macro_forge_account_id=html_macro_forge_account_id,
     )

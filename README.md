@@ -463,6 +463,18 @@ Confluence strips `<style>`, `<script>`, `<iframe>`, and other tags from normal 
 
 The macro name is selected from your Confluence type: `html` for Data Center/Server and `html-macro` as the Cloud fallback. Confluence Cloud HTML macro apps can register different macro keys, including `macro-html`, so override per publish with `--html-macro-name` or `html_macro_name` in front-matter when needed. To persist the setting, run `confpub config set html_macro_name macro-html` or set `CONFPUB_HTML_MACRO_NAME`.
 
+Forge-based Cloud HTML apps, such as Appfire "HTML for Confluence", use a different storage shape (`ac:adf-extension`) rather than the classic `ac:structured-macro`. For those sites, also set `--html-macro-format forge-adf-extension` and provide the Forge `extension-key` and `extension-id` copied from a working macro:
+
+```bash
+confpub config set html_macro_name macro-html
+confpub config set html_macro_format forge-adf-extension
+confpub config set html_macro_forge_extension_key "7dc8a3ac/.../static/macro-html"
+confpub config set html_macro_forge_extension_id "ari:cloud:ecosystem::extension/7dc8a3ac/.../static/macro-html"
+confpub config set html_macro_forge_cloud_id "CLOUD_ID"
+confpub config set html_macro_forge_context_ids "ari:cloud:confluence:site/CLOUD_ID"
+confpub config set html_macro_forge_account_id "ACCOUNT_ID"
+```
+
 ### Interactive JavaScript Applications
 
 `::: html` blocks can reference external JavaScript and CSS files. confpub automatically:
@@ -584,6 +596,12 @@ confpub guide --section commands       # Just commands
 | `CONFPUB_SPACE` | Default space key |
 | `CONFPUB_SSL_VERIFY` | SSL verification (`true`/`false` or CA bundle path) |
 | `CONFPUB_HTML_MACRO_NAME` | HTML macro key for `::: html` blocks, if your Confluence Cloud app differs from the built-in fallback |
+| `CONFPUB_HTML_MACRO_FORMAT` | HTML macro storage format: `classic` or `forge-adf-extension` |
+| `CONFPUB_HTML_MACRO_FORGE_EXTENSION_KEY` | Forge HTML macro `extension-key` copied from a working macro |
+| `CONFPUB_HTML_MACRO_FORGE_EXTENSION_ID` | Forge HTML macro `extension-id` copied from a working macro |
+| `CONFPUB_HTML_MACRO_FORGE_CLOUD_ID` | Optional Forge `cloud-id` copied from a working macro |
+| `CONFPUB_HTML_MACRO_FORGE_CONTEXT_IDS` | Optional Forge `context-ids` copied from a working macro |
+| `CONFPUB_HTML_MACRO_FORGE_ACCOUNT_ID` | Optional Forge `account-id` copied from a working macro |
 
 ---
 

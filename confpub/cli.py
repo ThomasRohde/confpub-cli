@@ -373,6 +373,13 @@ def page_publish(
     backup: bool = typer.Option(False, "--backup", help="Backup existing page before overwriting"),
     label: Optional[list[str]] = typer.Option(None, "--label", help="Label to apply (repeatable)"),
     html_macro_name: Optional[str] = typer.Option(None, "--html-macro-name", help="HTML macro name (html for DC; Cloud apps vary, default html-macro)"),
+    html_macro_format: Optional[str] = typer.Option(None, "--html-macro-format", help="HTML macro storage format: classic or forge-adf-extension"),
+    html_macro_forge_extension_key: Optional[str] = typer.Option(None, "--html-macro-forge-extension-key", help="Forge HTML macro extension-key copied from a working macro"),
+    html_macro_forge_extension_id: Optional[str] = typer.Option(None, "--html-macro-forge-extension-id", help="Forge HTML macro extension-id copied from a working macro"),
+    html_macro_forge_environment: Optional[str] = typer.Option(None, "--html-macro-forge-environment", help="Forge environment for the HTML macro (default PRODUCTION)"),
+    html_macro_forge_cloud_id: Optional[str] = typer.Option(None, "--html-macro-forge-cloud-id", help="Optional Forge cloud-id copied from a working macro"),
+    html_macro_forge_context_ids: Optional[str] = typer.Option(None, "--html-macro-forge-context-ids", help="Optional Forge context-ids copied from a working macro"),
+    html_macro_forge_account_id: Optional[str] = typer.Option(None, "--html-macro-forge-account-id", help="Optional Forge account-id copied from a working macro"),
 ) -> None:
     """Publish a single Markdown file to Confluence."""
     from pathlib import Path as _Path
@@ -439,6 +446,32 @@ def page_publish(
         # Resolve html_macro_name: CLI flag > front-matter > config/env/default in publish_page
         fm_html_macro = fm.html_macro_name if fm else None
         effective_html_macro = html_macro_name or fm_html_macro
+        fm_html_macro_format = fm.html_macro_format if fm else None
+        effective_html_macro_format = html_macro_format or fm_html_macro_format
+        fm_html_macro_forge_extension_key = fm.html_macro_forge_extension_key if fm else None
+        effective_html_macro_forge_extension_key = (
+            html_macro_forge_extension_key or fm_html_macro_forge_extension_key
+        )
+        fm_html_macro_forge_extension_id = fm.html_macro_forge_extension_id if fm else None
+        effective_html_macro_forge_extension_id = (
+            html_macro_forge_extension_id or fm_html_macro_forge_extension_id
+        )
+        fm_html_macro_forge_environment = fm.html_macro_forge_environment if fm else None
+        effective_html_macro_forge_environment = (
+            html_macro_forge_environment or fm_html_macro_forge_environment
+        )
+        fm_html_macro_forge_cloud_id = fm.html_macro_forge_cloud_id if fm else None
+        effective_html_macro_forge_cloud_id = (
+            html_macro_forge_cloud_id or fm_html_macro_forge_cloud_id
+        )
+        fm_html_macro_forge_context_ids = fm.html_macro_forge_context_ids if fm else None
+        effective_html_macro_forge_context_ids = (
+            html_macro_forge_context_ids or fm_html_macro_forge_context_ids
+        )
+        fm_html_macro_forge_account_id = fm.html_macro_forge_account_id if fm else None
+        effective_html_macro_forge_account_id = (
+            html_macro_forge_account_id or fm_html_macro_forge_account_id
+        )
 
         from confpub.publish import publish_page
         result = publish_page(
@@ -452,6 +485,13 @@ def page_publish(
             progress_callback=ctx,
             labels=merged_labels,
             html_macro_name=effective_html_macro,
+            html_macro_format=effective_html_macro_format,
+            html_macro_forge_extension_key=effective_html_macro_forge_extension_key,
+            html_macro_forge_extension_id=effective_html_macro_forge_extension_id,
+            html_macro_forge_environment=effective_html_macro_forge_environment,
+            html_macro_forge_cloud_id=effective_html_macro_forge_cloud_id,
+            html_macro_forge_context_ids=effective_html_macro_forge_context_ids,
+            html_macro_forge_account_id=effective_html_macro_forge_account_id,
         )
         ctx.result = result
         if not dry_run:
@@ -644,6 +684,13 @@ def plan_create(
     space: Optional[str] = typer.Option(None, "--space", help="Confluence space key (or CONFPUB_SPACE env var)"),
     parent: Optional[str] = typer.Option(None, "--parent", help="Override manifest parent"),
     html_macro_name: Optional[str] = typer.Option(None, "--html-macro-name", help="HTML macro name (html for DC; Cloud apps vary, default html-macro)"),
+    html_macro_format: Optional[str] = typer.Option(None, "--html-macro-format", help="HTML macro storage format: classic or forge-adf-extension"),
+    html_macro_forge_extension_key: Optional[str] = typer.Option(None, "--html-macro-forge-extension-key", help="Forge HTML macro extension-key copied from a working macro"),
+    html_macro_forge_extension_id: Optional[str] = typer.Option(None, "--html-macro-forge-extension-id", help="Forge HTML macro extension-id copied from a working macro"),
+    html_macro_forge_environment: Optional[str] = typer.Option(None, "--html-macro-forge-environment", help="Forge environment for the HTML macro (default PRODUCTION)"),
+    html_macro_forge_cloud_id: Optional[str] = typer.Option(None, "--html-macro-forge-cloud-id", help="Optional Forge cloud-id copied from a working macro"),
+    html_macro_forge_context_ids: Optional[str] = typer.Option(None, "--html-macro-forge-context-ids", help="Optional Forge context-ids copied from a working macro"),
+    html_macro_forge_account_id: Optional[str] = typer.Option(None, "--html-macro-forge-account-id", help="Optional Forge account-id copied from a working macro"),
 ) -> None:
     """Generate a plan artifact from a manifest."""
     with command_context("plan.create", target={"manifest": manifest}) as ctx:
@@ -655,6 +702,13 @@ def plan_create(
             space_override=space,
             parent_override=parent,
             html_macro_name=html_macro_name,
+            html_macro_format=html_macro_format,
+            html_macro_forge_extension_key=html_macro_forge_extension_key,
+            html_macro_forge_extension_id=html_macro_forge_extension_id,
+            html_macro_forge_environment=html_macro_forge_environment,
+            html_macro_forge_cloud_id=html_macro_forge_cloud_id,
+            html_macro_forge_context_ids=html_macro_forge_context_ids,
+            html_macro_forge_account_id=html_macro_forge_account_id,
         )
         ctx.result = result
 
@@ -678,6 +732,13 @@ def plan_apply(
     skip_fingerprint_check: bool = typer.Option(False, "--skip-fingerprint-check", help="Skip stale-state detection"),
     cascade: bool = typer.Option(False, "--cascade", help="Allow cascading deletes"),
     html_macro_name: Optional[str] = typer.Option(None, "--html-macro-name", help="HTML macro name (html for DC; Cloud apps vary, default html-macro)"),
+    html_macro_format: Optional[str] = typer.Option(None, "--html-macro-format", help="HTML macro storage format: classic or forge-adf-extension"),
+    html_macro_forge_extension_key: Optional[str] = typer.Option(None, "--html-macro-forge-extension-key", help="Forge HTML macro extension-key copied from a working macro"),
+    html_macro_forge_extension_id: Optional[str] = typer.Option(None, "--html-macro-forge-extension-id", help="Forge HTML macro extension-id copied from a working macro"),
+    html_macro_forge_environment: Optional[str] = typer.Option(None, "--html-macro-forge-environment", help="Forge environment for the HTML macro (default PRODUCTION)"),
+    html_macro_forge_cloud_id: Optional[str] = typer.Option(None, "--html-macro-forge-cloud-id", help="Optional Forge cloud-id copied from a working macro"),
+    html_macro_forge_context_ids: Optional[str] = typer.Option(None, "--html-macro-forge-context-ids", help="Optional Forge context-ids copied from a working macro"),
+    html_macro_forge_account_id: Optional[str] = typer.Option(None, "--html-macro-forge-account-id", help="Optional Forge account-id copied from a working macro"),
 ) -> None:
     """Apply a plan to Confluence."""
     with command_context("plan.apply", target={"plan": plan}) as ctx:
@@ -689,6 +750,13 @@ def plan_apply(
             skip_fingerprint_check=skip_fingerprint_check,
             cascade=cascade,
             html_macro_name=html_macro_name,
+            html_macro_format=html_macro_format,
+            html_macro_forge_extension_key=html_macro_forge_extension_key,
+            html_macro_forge_extension_id=html_macro_forge_extension_id,
+            html_macro_forge_environment=html_macro_forge_environment,
+            html_macro_forge_cloud_id=html_macro_forge_cloud_id,
+            html_macro_forge_context_ids=html_macro_forge_context_ids,
+            html_macro_forge_account_id=html_macro_forge_account_id,
         )
         ctx.result = result
 
@@ -718,7 +786,7 @@ def auth_inspect() -> None:
 
 @config_app.command("set")
 def config_set(
-    key: str = typer.Argument(..., help="Configuration key (base_url, user, token, ssl_verify, html_macro_name)"),
+    key: str = typer.Argument(..., help="Configuration key (base_url, user, token, ssl_verify, html_macro_name, html_macro_format, html_macro_forge_extension_key, html_macro_forge_extension_id, html_macro_forge_environment, html_macro_forge_cloud_id, html_macro_forge_context_ids, html_macro_forge_account_id)"),
     value: str = typer.Argument(..., help="Configuration value"),
 ) -> None:
     """Set a configuration value."""
@@ -856,11 +924,21 @@ def comment_add(
             md_text = text
 
         from confpub.config import load_config as _load_comment_config
-        from confpub.config import resolve_html_macro_name as _resolve_comment_html_macro_name
+        from confpub.config import resolve_html_macro_settings as _resolve_comment_html_macro_settings
         from confpub.converter import convert_markdown
         _comment_config = _load_comment_config()
-        _comment_html_macro = _resolve_comment_html_macro_name(_comment_config)
-        storage_body = convert_markdown(md_text, html_macro_name=_comment_html_macro)
+        _comment_html_macro = _resolve_comment_html_macro_settings(_comment_config)
+        storage_body = convert_markdown(
+            md_text,
+            html_macro_name=_comment_html_macro.name,
+            html_macro_format=_comment_html_macro.format,
+            html_macro_forge_extension_key=_comment_html_macro.forge_extension_key,
+            html_macro_forge_extension_id=_comment_html_macro.forge_extension_id,
+            html_macro_forge_environment=_comment_html_macro.forge_environment,
+            html_macro_forge_cloud_id=_comment_html_macro.forge_cloud_id,
+            html_macro_forge_context_ids=_comment_html_macro.forge_context_ids,
+            html_macro_forge_account_id=_comment_html_macro.forge_account_id,
+        )
 
         from confpub.confluence import build_client
         client = build_client()

@@ -325,7 +325,26 @@ def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
     # surrounding whitespace when markdownify processes them.
     _INLINE_MACROS = {"mathinline", "status", "anchor", "jira"}
 
-    # 1. Transform ac:structured-macro → div/span[data-confluence-macro]
+    # 1. Transform Forge ADF HTML macro extension → div[data-confluence-macro]
+    for adf in soup.find_all("ac:adf-extension"):
+        body_param = adf.find("ac:adf-parameter", attrs={"key": "__body-content"})
+        if not body_param:
+            continue
+
+        div = soup.new_tag("div")
+        div["data-confluence-macro"] = "html"
+
+        extension_key = adf.find("ac:adf-attribute", attrs={"key": "extension-key"})
+        if extension_key:
+            div["data-macro-params"] = f"extension-key={extension_key.get_text()}"
+
+        pre = soup.new_tag("pre")
+        pre["class"] = "confluence-code-body"
+        pre.string = body_param.get_text()
+        div.append(pre)
+        adf.replace_with(div)
+
+    # 2. Transform ac:structured-macro → div/span[data-confluence-macro]
     for macro in soup.find_all("ac:structured-macro"):
         macro_name = macro.get("ac:name", "unknown")
         tag_name = "span" if macro_name in _INLINE_MACROS else "div"
@@ -379,7 +398,7 @@ def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
 
         macro.replace_with(div)
 
-    # 2. Transform ac:image → img
+    # 3. Transform ac:image → img
     for img_macro in soup.find_all("ac:image"):
         img = soup.new_tag("img")
 

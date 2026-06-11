@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from confpub.assets import discover_assets
-from confpub.config import load_config, resolve_html_macro_name
+from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient
 from confpub.converter import convert_markdown, fingerprint_content
 from confpub.errors import ERR_IO_FILE_NOT_FOUND, ERR_VALIDATION_REQUIRED, ConfpubError
@@ -36,6 +36,13 @@ def create_plan(
     space_override: str | None = None,
     parent_override: str | None = None,
     html_macro_name: str | None = None,
+    html_macro_format: str | None = None,
+    html_macro_forge_extension_key: str | None = None,
+    html_macro_forge_extension_id: str | None = None,
+    html_macro_forge_environment: str | None = None,
+    html_macro_forge_cloud_id: str | None = None,
+    html_macro_forge_context_ids: str | None = None,
+    html_macro_forge_account_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a plan artifact from a manifest.
 
@@ -54,8 +61,18 @@ def create_plan(
     config = load_config()
     client = ConfluenceClient(config)
 
-    # Resolve html_macro_name: explicit > config/env > platform default
-    effective_html_macro = resolve_html_macro_name(config, html_macro_name)
+    # Resolve HTML macro settings: explicit > config/env > platform default.
+    html_macro_settings = resolve_html_macro_settings(
+        config,
+        name_override=html_macro_name,
+        format_override=html_macro_format,
+        forge_extension_key_override=html_macro_forge_extension_key,
+        forge_extension_id_override=html_macro_forge_extension_id,
+        forge_environment_override=html_macro_forge_environment,
+        forge_cloud_id_override=html_macro_forge_cloud_id,
+        forge_context_ids_override=html_macro_forge_context_ids,
+        forge_account_id_override=html_macro_forge_account_id,
+    )
 
     # Resolve page tree
     flat_pages = resolve_page_tree(manifest)
@@ -80,7 +97,17 @@ def create_plan(
 
         # Read and convert markdown
         md_text = source_path.read_text(encoding="utf-8")
-        storage = convert_markdown(md_text, html_macro_name=effective_html_macro)
+        storage = convert_markdown(
+            md_text,
+            html_macro_name=html_macro_settings.name,
+            html_macro_format=html_macro_settings.format,
+            html_macro_forge_extension_key=html_macro_settings.forge_extension_key,
+            html_macro_forge_extension_id=html_macro_settings.forge_extension_id,
+            html_macro_forge_environment=html_macro_settings.forge_environment,
+            html_macro_forge_cloud_id=html_macro_settings.forge_cloud_id,
+            html_macro_forge_context_ids=html_macro_settings.forge_context_ids,
+            html_macro_forge_account_id=html_macro_settings.forge_account_id,
+        )
         local_fingerprint = fingerprint_content(storage)
 
         # Look up existing page

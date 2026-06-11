@@ -34,6 +34,12 @@ confpub config set user you@example.com
 | `CONFPUB_SPACE` | Default space key (avoids `--space` on every command) |
 | `CONFPUB_SSL_VERIFY` | SSL verification (`true`/`false` or CA bundle path) |
 | `CONFPUB_HTML_MACRO_NAME` | HTML macro key for `::: html` blocks when your Cloud app differs from the built-in fallback |
+| `CONFPUB_HTML_MACRO_FORMAT` | `classic` or `forge-adf-extension` for Forge HTML macro apps |
+| `CONFPUB_HTML_MACRO_FORGE_EXTENSION_KEY` | Forge `extension-key` copied from a working HTML macro |
+| `CONFPUB_HTML_MACRO_FORGE_EXTENSION_ID` | Forge `extension-id` copied from a working HTML macro |
+| `CONFPUB_HTML_MACRO_FORGE_CLOUD_ID` | Optional Forge `cloud-id` copied from a working HTML macro |
+| `CONFPUB_HTML_MACRO_FORGE_CONTEXT_IDS` | Optional Forge `context-ids` copied from a working HTML macro |
+| `CONFPUB_HTML_MACRO_FORGE_ACCOUNT_ID` | Optional Forge `account-id` copied from a working HTML macro |
 | `LLM=true` | Suppress interactive prompts; return structured errors instead |
 
 **Credential precedence:** CLI flags > environment variables > config file (`~/.config/confpub/config.json`) > OS keychain.
@@ -103,11 +109,12 @@ For Cloud pages that use HTML macros, layouts, includes, Jira, or page links, ve
    ```
 4. Check the rendered page for:
    - `unknown-macro?name=...`
+   - empty Forge HTML placeholders after using `macro-html`
    - literal `:::` markers
    - literal `[text](Page Title)` links
    - HTML macro iframe console errors relevant to the custom widget
 
-Storage being valid is not enough; Cloud macro apps can still fail at render time.
+Storage being valid is not enough; Cloud macro apps can still fail at render time. Forge HTML macros render client-side in an iframe, so REST `body.view` can show export fallback text even when the browser-rendered page works. Verify Forge macros in the browser.
 
 ## Multi-Page Tree (Safe Path)
 

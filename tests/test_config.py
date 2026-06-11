@@ -7,11 +7,19 @@ import pytest
 
 from confpub.config import (
     ConfigModel,
+    ENV_HTML_MACRO_FORGE_ACCOUNT_ID,
+    ENV_HTML_MACRO_FORGE_CLOUD_ID,
+    ENV_HTML_MACRO_FORGE_CONTEXT_IDS,
+    ENV_HTML_MACRO_FORMAT,
+    ENV_HTML_MACRO_FORGE_EXTENSION_ID,
+    ENV_HTML_MACRO_FORGE_EXTENSION_KEY,
     ENV_HTML_MACRO_NAME,
     ResolvedConfig,
     default_html_macro_name,
     load_config,
+    resolve_html_macro_format,
     resolve_html_macro_name,
+    resolve_html_macro_settings,
     set_config_value,
 )
 from confpub.errors import ConfpubError, ERR_AUTH_REQUIRED
@@ -74,6 +82,7 @@ class TestResolvedConfig:
         d = cfg.to_display_dict()
         assert d["html_macro_name"] is None
         assert d["effective_html_macro_name"] == "html-macro"
+        assert d["effective_html_macro_format"] == "classic"
 
 
 class TestLoadConfig:
@@ -90,12 +99,24 @@ class TestLoadConfig:
         monkeypatch.setenv("CONFPUB_TOKEN", "env_token")
         monkeypatch.setenv("CONFPUB_USER", "user@example.com")
         monkeypatch.setenv(ENV_HTML_MACRO_NAME, "html-macro")
+        monkeypatch.setenv(ENV_HTML_MACRO_FORMAT, "forge-adf-extension")
+        monkeypatch.setenv(ENV_HTML_MACRO_FORGE_EXTENSION_KEY, "app/static/macro-html")
+        monkeypatch.setenv(ENV_HTML_MACRO_FORGE_EXTENSION_ID, "ari:cloud:ecosystem::extension/app/static/macro-html")
+        monkeypatch.setenv(ENV_HTML_MACRO_FORGE_CLOUD_ID, "cloud-123")
+        monkeypatch.setenv(ENV_HTML_MACRO_FORGE_CONTEXT_IDS, "ari:cloud:confluence:site/cloud-123")
+        monkeypatch.setenv(ENV_HTML_MACRO_FORGE_ACCOUNT_ID, "account-123")
         cfg = load_config()
         assert cfg.base_url == "https://env.atlassian.net/wiki"
         assert cfg.token == "env_token"
         assert cfg.user == "user@example.com"
         assert cfg.token_source == "env_var"
         assert cfg.html_macro_name == "html-macro"
+        assert cfg.html_macro_format == "forge-adf-extension"
+        assert cfg.html_macro_forge_extension_key == "app/static/macro-html"
+        assert cfg.html_macro_forge_extension_id == "ari:cloud:ecosystem::extension/app/static/macro-html"
+        assert cfg.html_macro_forge_cloud_id == "cloud-123"
+        assert cfg.html_macro_forge_context_ids == "ari:cloud:confluence:site/cloud-123"
+        assert cfg.html_macro_forge_account_id == "account-123"
 
     def test_no_config(self, tmp_path, monkeypatch):
         monkeypatch.setattr("confpub.config.CONFIG_FILE", tmp_path / "missing-config.json")
@@ -103,6 +124,12 @@ class TestLoadConfig:
         monkeypatch.delenv("CONFPUB_TOKEN", raising=False)
         monkeypatch.delenv("CONFPUB_USER", raising=False)
         monkeypatch.delenv(ENV_HTML_MACRO_NAME, raising=False)
+        monkeypatch.delenv(ENV_HTML_MACRO_FORMAT, raising=False)
+        monkeypatch.delenv(ENV_HTML_MACRO_FORGE_EXTENSION_KEY, raising=False)
+        monkeypatch.delenv(ENV_HTML_MACRO_FORGE_EXTENSION_ID, raising=False)
+        monkeypatch.delenv(ENV_HTML_MACRO_FORGE_CLOUD_ID, raising=False)
+        monkeypatch.delenv(ENV_HTML_MACRO_FORGE_CONTEXT_IDS, raising=False)
+        monkeypatch.delenv(ENV_HTML_MACRO_FORGE_ACCOUNT_ID, raising=False)
         cfg = load_config()
         assert cfg.base_url is None
         assert cfg.token is None
@@ -130,6 +157,29 @@ class TestSetConfigValue:
         set_config_value("html_macro_name", "html-macro")
         data = json.loads(config_file.read_text())
         assert data["html_macro_name"] == "html-macro"
+
+    def test_set_forge_html_macro_fields(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("confpub.config.CONFIG_DIR", tmp_path)
+        monkeypatch.setattr("confpub.config.CONFIG_FILE", config_file)
+
+        set_config_value("html_macro_format", "forge-adf-extension")
+        set_config_value("html_macro_forge_extension_key", "app/static/macro-html")
+        set_config_value(
+            "html_macro_forge_extension_id",
+            "ari:cloud:ecosystem::extension/app/static/macro-html",
+        )
+        set_config_value("html_macro_forge_cloud_id", "cloud-123")
+        set_config_value("html_macro_forge_context_ids", "ari:cloud:confluence:site/cloud-123")
+        set_config_value("html_macro_forge_account_id", "account-123")
+
+        data = json.loads(config_file.read_text())
+        assert data["html_macro_format"] == "forge-adf-extension"
+        assert data["html_macro_forge_extension_key"] == "app/static/macro-html"
+        assert data["html_macro_forge_extension_id"] == "ari:cloud:ecosystem::extension/app/static/macro-html"
+        assert data["html_macro_forge_cloud_id"] == "cloud-123"
+        assert data["html_macro_forge_context_ids"] == "ari:cloud:confluence:site/cloud-123"
+        assert data["html_macro_forge_account_id"] == "account-123"
 
 
 class TestHtmlMacroNameResolution:
@@ -166,3 +216,47 @@ class TestHtmlMacroNameResolution:
 
         assert cfg.html_macro_name == "html-macro"
         assert resolve_html_macro_name(cfg) == "html-macro"
+
+
+class TestHtmlMacroFormatResolution:
+    def test_default_format_is_classic(self):
+        assert resolve_html_macro_format(ResolvedConfig()) == "classic"
+
+    def test_forge_format_from_config(self):
+        cfg = ResolvedConfig(html_macro_format="forge-adf-extension")
+        assert resolve_html_macro_format(cfg) == "forge-adf-extension"
+
+    def test_invalid_format_raises_validation_error(self):
+        cfg = ResolvedConfig(html_macro_format="bad-format")
+        with pytest.raises(ConfpubError):
+            resolve_html_macro_format(cfg)
+
+    def test_forge_settings_require_identifiers(self):
+        cfg = ResolvedConfig(html_macro_format="forge-adf-extension")
+        with pytest.raises(ConfpubError) as exc_info:
+            resolve_html_macro_settings(cfg)
+        assert "html_macro_forge_extension_key" in exc_info.value.details["missing"]
+        assert "html_macro_forge_extension_id" in exc_info.value.details["missing"]
+
+    def test_forge_settings_resolved(self):
+        cfg = ResolvedConfig(
+            base_url="https://x.atlassian.net/wiki",
+            html_macro_name="macro-html",
+            html_macro_format="forge-adf-extension",
+            html_macro_forge_extension_key="app/static/macro-html",
+            html_macro_forge_extension_id="ari:cloud:ecosystem::extension/app/static/macro-html",
+            html_macro_forge_cloud_id="cloud-123",
+            html_macro_forge_context_ids="ari:cloud:confluence:site/cloud-123",
+            html_macro_forge_account_id="account-123",
+        )
+
+        settings = resolve_html_macro_settings(cfg)
+
+        assert settings.name == "macro-html"
+        assert settings.format == "forge-adf-extension"
+        assert settings.forge_extension_key == "app/static/macro-html"
+        assert settings.forge_extension_id == "ari:cloud:ecosystem::extension/app/static/macro-html"
+        assert settings.forge_environment == "PRODUCTION"
+        assert settings.forge_cloud_id == "cloud-123"
+        assert settings.forge_context_ids == "ari:cloud:confluence:site/cloud-123"
+        assert settings.forge_account_id == "account-123"

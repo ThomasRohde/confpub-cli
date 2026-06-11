@@ -144,7 +144,14 @@ def build_guide() -> dict[str, Any]:
                 "group": "write",
                 "mutates": True,
                 "description": "Publish a single Markdown file to Confluence",
-                "flags": ["--space", "--parent", "--title", "--title-from-h1", "--page-id", "--dry-run", "--backup", "--label", "--html-macro-name"],
+                "flags": [
+                    "--space", "--parent", "--title", "--title-from-h1", "--page-id",
+                    "--dry-run", "--backup", "--label", "--html-macro-name",
+                    "--html-macro-format", "--html-macro-forge-extension-key",
+                    "--html-macro-forge-extension-id", "--html-macro-forge-environment",
+                    "--html-macro-forge-cloud-id", "--html-macro-forge-context-ids",
+                    "--html-macro-forge-account-id",
+                ],
                 "agent_hint": (
                     "Title precedence: explicit --title > --title-from-h1 > front-matter title > filename inference. "
                     "Space precedence: --space > front-matter space > CONFPUB_SPACE env var. "
@@ -157,6 +164,8 @@ def build_guide() -> dict[str, Any]:
                     "HTML macro name: DC default is html; Cloud fallback is html-macro, "
                     "but Cloud apps vary. Override with --html-macro-name, "
                     "html_macro_name in front-matter, CONFPUB_HTML_MACRO_NAME, or config. "
+                    "Forge HTML macro apps require --html-macro-format forge-adf-extension "
+                    "plus the Forge extension-key and extension-id copied from a working macro. "
                     "After a successful publish (not dry-run), the trust score cache is warmed for the published page."
                 ),
             },
@@ -339,7 +348,13 @@ def build_guide() -> dict[str, Any]:
                 "group": "transactional",
                 "mutates": False,
                 "description": "Generate a plan artifact from a manifest or file",
-                "flags": ["--manifest", "--output", "--space", "--parent", "--html-macro-name"],
+                "flags": [
+                    "--manifest", "--output", "--space", "--parent", "--html-macro-name",
+                    "--html-macro-format", "--html-macro-forge-extension-key",
+                    "--html-macro-forge-extension-id", "--html-macro-forge-environment",
+                    "--html-macro-forge-cloud-id", "--html-macro-forge-context-ids",
+                    "--html-macro-forge-account-id",
+                ],
             },
             "plan.validate": {
                 "group": "transactional",
@@ -354,6 +369,10 @@ def build_guide() -> dict[str, Any]:
                 "flags": [
                     "--plan", "--dry-run", "--backup",
                     "--skip-fingerprint-check", "--cascade", "--html-macro-name",
+                    "--html-macro-format", "--html-macro-forge-extension-key",
+                    "--html-macro-forge-extension-id", "--html-macro-forge-environment",
+                    "--html-macro-forge-cloud-id", "--html-macro-forge-context-ids",
+                    "--html-macro-forge-account-id",
                 ],
                 "safety_flags": {
                     "--skip-fingerprint-check": (
@@ -389,7 +408,11 @@ def build_guide() -> dict[str, Any]:
                 "flags": [],
                 "args": ["KEY", "VALUE"],
                 "agent_hint": (
-                    "Valid keys: base_url, user, token, ssl_verify, html_macro_name. "
+                    "Valid keys: base_url, user, token, ssl_verify, html_macro_name, "
+                    "html_macro_format, html_macro_forge_extension_key, "
+                    "html_macro_forge_extension_id, html_macro_forge_environment, "
+                    "html_macro_forge_cloud_id, html_macro_forge_context_ids, "
+                    "html_macro_forge_account_id. "
                     "Values are persisted to the config file (~/.config/confpub/config.json)."
                 ),
                 "examples": [
@@ -397,6 +420,10 @@ def build_guide() -> dict[str, Any]:
                     "confpub config set user alice@example.com",
                     "confpub config set token ATATT...",
                     "confpub config set html_macro_name html-macro",
+                    "confpub config set html_macro_format forge-adf-extension",
+                    "confpub config set html_macro_forge_extension_key 7dc8a3ac/.../static/macro-html",
+                    "confpub config set html_macro_forge_extension_id ari:cloud:ecosystem::extension/7dc8a3ac/.../static/macro-html",
+                    "confpub config set html_macro_forge_cloud_id CLOUD_ID",
                 ],
             },
             "config.inspect": {
@@ -722,19 +749,20 @@ def build_guide() -> dict[str, Any]:
                 "excerpt_include":  "{excerpt-include:Page Title} → ac:structured-macro excerpt-include",
                 "include_page":     "{include:Page Title} → ac:structured-macro include",
                 "html_macro": (
-                    "::: html\\n<raw HTML>\\n::: -> ac:structured-macro html (DC) or html-macro (Cloud fallback). "
+                    "::: html\\n<raw HTML>\\n::: -> ac:structured-macro html (DC) or html-macro (Cloud classic fallback). "
                     "Content is wrapped in CDATA and passed verbatim — Confluence does NOT strip "
                     "<style>, <script>, <iframe>, or any other tags inside the HTML macro. "
                     "Use this for custom CSS styling, dashboards, diagrams, embedded widgets, "
                     "or any HTML that Confluence would otherwise sanitize. "
                     "Confluence Cloud HTML macro names vary by installed app. The Cloud fallback "
-                    "is html-macro, but macro-html is also used by some apps. Override via "
-                    "--html-macro-name, html_macro_name front-matter, CONFPUB_HTML_MACRO_NAME, "
-                    "or confpub config set html_macro_name. "
+                    "is html-macro, but macro-html is also used by some apps. Forge HTML macro "
+                    "apps use ac:adf-extension storage and need html_macro_format=forge-adf-extension "
+                    "plus extension-key and extension-id. Override via --html-macro-name, "
+                    "--html-macro-format, front-matter, CONFPUB_HTML_MACRO_* env vars, or config. "
                     "ASSET AUTO-DISCOVERY: <script src=\"app.js\"> and <link href=\"style.css\"> "
                     "references inside ::: html blocks are automatically detected. The referenced "
-                    "files are uploaded as page attachments and the src/href URLs in the CDATA "
-                    "are rewritten to point to the Confluence attachment download path. "
+                    "files are uploaded as page attachments and the src/href URLs in the HTML "
+                    "macro body are rewritten to point to the Confluence attachment download path. "
                     "This enables interactive JavaScript applications — bundle your app into a "
                     "single .js file, reference it from a ::: html block, and confpub handles "
                     "the rest. Missing files produce warnings (not errors) so partial publishes "
@@ -758,11 +786,13 @@ def build_guide() -> dict[str, Any]:
                 "Example: ::: html\\n<style>.box { border: 1px solid blue; }</style>\\n"
                 "<div class=\"box\">Styled content</div>\\n::: "
                 "Multiple ::: html blocks can appear on the same page. "
-                "The macro name auto-detects Cloud vs DC — no configuration needed. "
+                "The default macro name follows Cloud vs DC, but Cloud apps can vary; "
+                "Forge HTML apps need html_macro_format=forge-adf-extension plus the "
+                "Forge extension-key and extension-id copied from a working macro. "
                 "INTERACTIVE APPS: To embed a JavaScript application, place the bundled .js file "
                 "next to the .md file, then reference it: ::: html\\n<div id=\"app\"></div>\\n"
                 "<script src=\"app.js\"></script>\\n::: — confpub auto-discovers the <script src>, "
-                "uploads app.js as a page attachment, and rewrites the URL in the CDATA block. "
+                "uploads app.js as a page attachment, and rewrites the URL in the HTML macro body. "
                 "The same works for <link href=\"style.css\"> for external CSS. "
                 "Missing files produce warnings, not errors — the page still publishes."
             ),
@@ -862,6 +892,13 @@ def build_guide() -> dict[str, Any]:
                 "labels": "Labels to apply (list of strings, or single string)",
                 "page_id": "Confluence page ID for direct update (string or integer)",
                 "html_macro_name": "HTML macro name override (string; 'html' for DC; Cloud apps vary, built-in fallback is 'html-macro')",
+                "html_macro_format": "HTML macro storage format ('classic' or 'forge-adf-extension')",
+                "html_macro_forge_extension_key": "Forge HTML macro extension-key copied from a working macro",
+                "html_macro_forge_extension_id": "Forge HTML macro extension-id copied from a working macro",
+                "html_macro_forge_environment": "Forge environment, usually PRODUCTION",
+                "html_macro_forge_cloud_id": "Optional Forge cloud-id copied from a working macro",
+                "html_macro_forge_context_ids": "Optional Forge context-ids copied from a working macro",
+                "html_macro_forge_account_id": "Optional Forge account-id copied from a working macro",
             },
             "precedence": {
                 "title": "--title > --title-from-h1 > front-matter > filename",
@@ -870,6 +907,7 @@ def build_guide() -> dict[str, Any]:
                 "page_id": "--page-id > front-matter",
                 "labels": "CLI --label + front-matter labels merged (deduplicated)",
                 "html_macro_name": "--html-macro-name > front-matter > CONFPUB_HTML_MACRO_NAME/config > platform fallback (Cloud=html-macro, DC=html)",
+                "html_macro_format": "--html-macro-format > front-matter > CONFPUB_HTML_MACRO_FORMAT/config > classic",
             },
             "example": (
                 "---\n"
@@ -929,6 +967,12 @@ def build_guide() -> dict[str, Any]:
                 "CONFPUB_SSL_VERIFY": "SSL verification (true/false/ca-bundle path)",
                 "CONFPUB_SPACE": "Default space key (avoids shell expansion issues with --space)",
                 "CONFPUB_HTML_MACRO_NAME": "HTML macro name for ::: html blocks",
+                "CONFPUB_HTML_MACRO_FORMAT": "HTML macro storage format: classic or forge-adf-extension",
+                "CONFPUB_HTML_MACRO_FORGE_EXTENSION_KEY": "Forge HTML macro extension-key",
+                "CONFPUB_HTML_MACRO_FORGE_EXTENSION_ID": "Forge HTML macro extension-id",
+                "CONFPUB_HTML_MACRO_FORGE_CLOUD_ID": "Optional Forge cloud-id",
+                "CONFPUB_HTML_MACRO_FORGE_CONTEXT_IDS": "Optional Forge context-ids",
+                "CONFPUB_HTML_MACRO_FORGE_ACCOUNT_ID": "Optional Forge account-id",
             },
             "non_interactive": (
                 "Never prompts when LLM=true or stdin is non-interactive"
