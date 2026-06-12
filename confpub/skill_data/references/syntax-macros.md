@@ -105,13 +105,14 @@ Links to other Confluence pages — use the page title as the URL:
 ```markdown
 [See the Architecture Overview](Architecture Overview)
 [API docs](API Reference)
+[Special title](<ADR-001: API & Settlement>)
 ```
 
 confpub auto-converts these to native Confluence page links (`ri:page` references). Link text can differ from page title. External URLs work normally.
 
 ## Cloud Page Link Caveats
 
-Page-title links can fail to convert in Cloud when the title contains apostrophes, special characters, or points to a personal-space home page. If a rendered page shows literal Markdown such as `[Personal home](Example User's Home)`, use an absolute Confluence URL or inspect the target page and link by a stable URL.
+Bare Markdown link targets with spaces or special characters can be left as literal Markdown by the Markdown parser. Wrap page titles in angle brackets (`[text](<Page Title>)`) or use an absolute Confluence URL. Page-title links can also fail to resolve in Cloud when the title contains apostrophes, special characters, or points to a personal-space home page. If a rendered page shows literal Markdown such as `[Personal home](Example User's Home)`, use an absolute Confluence URL or inspect the target page and link by a stable URL.
 
 For Cloud personal spaces, the overview URL is typically:
 

@@ -14,11 +14,42 @@ from typing import Any
 from confpub.assets import AssetRef, discover_assets, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
 from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient, build_page_url
-from confpub.converter import convert_markdown, fingerprint_content
+from confpub.converter import convert_markdown, detect_unconverted_page_title_links, fingerprint_content
 from confpub.errors import ERR_CONFLICT_FINGERPRINT, ERR_IO_FILE_NOT_FOUND, ConfpubError
 from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, update_lockfile
 from confpub.manifest import PlanArtifact
 from confpub.validator import _load_plan
+
+
+def _planned_assets(page: Any, source_path: Path) -> list[AssetRef]:
+    """Resolve planned attachments relative to the page source directory."""
+    assets: list[AssetRef] = []
+    seen: set[str] = set()
+    base_dir = source_path.parent
+    for attachment in page.attachments:
+        if attachment.operation == "noop":
+            continue
+        raw_path = Path(attachment.file)
+        resolved = raw_path if raw_path.is_absolute() else base_dir / raw_path
+        resolved = resolved.resolve()
+        key = str(resolved)
+        if key in seen:
+            continue
+        if not resolved.is_file():
+            raise ConfpubError(
+                ERR_IO_FILE_NOT_FOUND,
+                f"Planned attachment missing: {attachment.file}",
+                details={"file": attachment.file, "page": page.title},
+                retryable=False,
+                suggested_action="fix_input",
+            )
+        seen.add(key)
+        assets.append(AssetRef(
+            source_path=attachment.file,
+            resolved_path=str(resolved),
+            filename=resolved.name,
+        ))
+    return assets
 
 
 def apply_plan(
@@ -65,6 +96,7 @@ def apply_plan(
 
     changes: list[dict[str, Any]] = []
     counts = {"create": 0, "update": 0, "attachments_upload": 0, "labels_applied": 0}
+    warnings: list[str] = []
 
     # Resolve parent page IDs by title
     parent_ids: dict[str, str] = {}  # title → page_id
@@ -107,6 +139,8 @@ def apply_plan(
 
         # Read and convert
         md_text = source_path.read_text(encoding="utf-8")
+        for warning in detect_unconverted_page_title_links(md_text):
+            warnings.append(f"{page.source_file}: {warning}")
         storage = convert_markdown(
             md_text,
             html_macro_name=html_macro_settings.name,
@@ -118,9 +152,10 @@ def apply_plan(
             html_macro_forge_context_ids=html_macro_settings.forge_context_ids,
             html_macro_forge_account_id=html_macro_settings.forge_account_id,
         )
+        local_fingerprint = fingerprint_content(storage)
 
         # Discover and process assets
-        assets = discover_assets(md_text, source_path.parent, None)
+        assets = _planned_assets(page, source_path) if page.attachments else discover_assets(md_text, source_path.parent, None)
 
         # Get parent ID
         parent_title = page.parent_title or plan.parent
@@ -130,18 +165,17 @@ def apply_plan(
         effective_operation = page.operation
         effective_page_id = page.confluence_page_id
         if dry_run and page.operation == "create":
-            local_fp = fingerprint_content(storage)
             if page.title in lockfile.pages:
                 effective_page_id = lockfile.pages[page.title].page_id
                 remote_fp = client.fingerprint_page(effective_page_id)
                 if remote_fp is not None:
-                    effective_operation = "noop" if remote_fp == local_fp else "update"
+                    effective_operation = "noop" if remote_fp == local_fingerprint else "update"
             else:
                 existing = client.get_page(plan.space, page.title)
                 if existing:
                     effective_page_id = str(existing["id"])
                     remote_fp = client.fingerprint_page(effective_page_id)
-                    effective_operation = "noop" if remote_fp == local_fp else "update"
+                    effective_operation = "noop" if remote_fp == local_fingerprint else "update"
 
         if effective_operation == "noop":
             changes.append({
@@ -197,7 +231,7 @@ def apply_plan(
                     counts["labels_applied"] += len(page.labels)
 
                 # Update lockfile and parent tracking
-                update_lockfile(lockfile, page.title, new_id, new_version if isinstance(new_version, int) else 1, content_fingerprint=fingerprint_content(storage))
+                update_lockfile(lockfile, page.title, new_id, new_version if isinstance(new_version, int) else 1, content_fingerprint=local_fingerprint)
                 parent_ids[page.title] = new_id
             else:
                 # Dry-run: report labels
@@ -271,7 +305,7 @@ def apply_plan(
                 update_lockfile(
                     lockfile, page.title, page.confluence_page_id,
                     new_version if isinstance(new_version, int) else 1,
-                    content_fingerprint=fingerprint_content(storage),
+                    content_fingerprint=local_fingerprint,
                 )
                 parent_ids[page.title] = page.confluence_page_id
             else:
@@ -286,10 +320,13 @@ def apply_plan(
     if not dry_run:
         save_lockfile(lockfile_path, lockfile)
 
-    return {
+    result = {
         "dry_run": dry_run,
         "changes": changes,
         "summary": counts,
         "lockfile_updated": not dry_run and len(changes) > 0,
         "lockfile_path": str(lockfile_path) if not dry_run else None,
     }
+    if warnings:
+        result["warnings"] = warnings
+    return result

@@ -1,7 +1,7 @@
 """confpub.lock — page ID persistence for idempotent re-publishing.
 
 The lockfile maps page titles to Confluence page IDs and versions.
-It uses atomic writes (tempfile + os.rename) to prevent corruption.
+It uses atomic writes (tempfile + os.replace) to prevent corruption.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def load_lockfile(path: str | Path) -> Lockfile | None:
 
 
 def save_lockfile(path: str | Path, lockfile: Lockfile) -> None:
-    """Atomically write the lockfile using tempfile + os.rename."""
+    """Atomically write the lockfile using tempfile + os.replace."""
     p = Path(path)
     lockfile.last_updated = datetime.now(timezone.utc).isoformat()
 

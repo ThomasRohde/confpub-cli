@@ -273,6 +273,51 @@ class TestApplyLabels:
         assert update_change["labels_to_apply"] == ["updated"]
 
 
+class TestApplyAssets:
+    @patch("confpub.applier.upload_assets")
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_uploads_planned_manifest_asset_not_referenced_in_markdown(
+        self, MockClient, mock_config, mock_upload_assets, tmp_path, mock_client
+    ):
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        (tmp_path / "dashboard.md").write_text("# Dashboard\n\nNo static script tag.", encoding="utf-8")
+        (assets_dir / "dashboard-data.js").write_text("window.__dataReady({rows: []});", encoding="utf-8")
+        plan_data = {
+            "schema_version": "1.0",
+            "created_at": "2026-02-28T14:30:00Z",
+            "space": "DEV",
+            "parent": "Root",
+            "pages": [
+                {
+                    "id": "plan_1",
+                    "title": "Dashboard",
+                    "source_file": "dashboard.md",
+                    "confluence_page_id": None,
+                    "current_fingerprint": None,
+                    "operation": "create",
+                    "attachments": [
+                        {"file": "assets/dashboard-data.js", "operation": "upload"},
+                    ],
+                },
+            ],
+            "summary": {"create": 1, "update": 0, "noop": 0, "attachments_to_upload": 1},
+        }
+        (tmp_path / "plan.json").write_text(json.dumps(plan_data), encoding="utf-8")
+
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+        mock_upload_assets.return_value = []
+
+        result = apply_plan(str(tmp_path / "plan.json"), dry_run=False)
+
+        assert result["summary"]["attachments_upload"] == 1
+        asset = mock_upload_assets.call_args[0][2][0]
+        assert asset.source_path == "assets/dashboard-data.js"
+        assert asset.filename == "dashboard-data.js"
+
+
 class TestFingerprintCheck:
     @patch("confpub.applier.load_config")
     @patch("confpub.applier.ConfluenceClient")

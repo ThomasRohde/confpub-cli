@@ -13,6 +13,7 @@ import re
 import uuid
 from html import escape
 from typing import Any
+from urllib.parse import unquote
 
 import yaml
 
@@ -42,6 +43,58 @@ ADMONITION_MAP: dict[str, str] = {
 
 # Regex to detect GitHub-flavored admonition in blockquote first line
 _ADMONITION_RE = re.compile(r"^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$", re.IGNORECASE)
+_PAGE_LINK_FILE_EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,8}(?:$|[?#])")
+_BARE_PAGE_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]+)\]\(([^)\n]*\s[^)\n]*)\)")
+
+
+def _is_external_or_anchor_link(href: str) -> bool:
+    stripped = href.strip()
+    lowered = stripped.lower()
+    return (
+        not stripped
+        or lowered.startswith((
+            "http://",
+            "https://",
+            "mailto:",
+            "tel:",
+            "ftp://",
+            "data:",
+            "javascript:",
+        ))
+        or stripped.startswith(("#", "/", "//"))
+    )
+
+
+def _is_page_title_link(href: str) -> bool:
+    stripped = href.strip()
+    if _is_external_or_anchor_link(stripped):
+        return False
+    if "/" in stripped or "\\" in stripped:
+        return False
+    if _PAGE_LINK_FILE_EXT_RE.search(stripped):
+        return False
+    return True
+
+
+def detect_unconverted_page_title_links(md_text: str) -> list[str]:
+    """Find bare Markdown page-title links that CommonMark leaves as literal text."""
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for match in _BARE_PAGE_LINK_RE.finditer(md_text):
+        target = match.group(2).strip()
+        if target.startswith("<") and target.endswith(">"):
+            continue
+        if _is_external_or_anchor_link(target):
+            continue
+        key = match.group(0)
+        if key in seen:
+            continue
+        seen.add(key)
+        warnings.append(
+            "Page-title link may publish as literal Markdown: "
+            f"{key}. Wrap the title as [text](<Page Title>) or use an absolute Confluence URL."
+        )
+    return warnings
 
 
 class ConfluenceRenderer:
@@ -71,6 +124,7 @@ class ConfluenceRenderer:
         self._html_macro_forge_cloud_id = html_macro_forge_cloud_id
         self._html_macro_forge_context_ids = html_macro_forge_context_ids
         self._html_macro_forge_account_id = html_macro_forge_account_id
+        self._link_stack: list[bool] = []
 
     def render(self, tokens: list[Token], options: dict[str, Any], env: dict[str, Any]) -> str:
         """Render a list of tokens to Confluence Storage Format."""
@@ -78,6 +132,7 @@ class ConfluenceRenderer:
         self._list_stack = []
         self._task_id = 0
         self._footnote_refs = {}
+        self._link_stack = []
         i = 0
         while i < len(tokens):
             token = tokens[i]
@@ -179,10 +234,24 @@ class ConfluenceRenderer:
         href = ""
         if token.attrs:
             href = token.attrs.get("href", "") if isinstance(token.attrs, dict) else ""
-        self._output.append(f'<a href="{escape(str(href))}">')
+        href = str(href)
+        if _is_page_title_link(href):
+            title = unquote(href)
+            self._output.append(
+                f'<ac:link><ri:page ri:content-title="{escape(title)}" />'
+                "<ac:plain-text-link-body>"
+            )
+            self._link_stack.append(True)
+        else:
+            self._output.append(f'<a href="{escape(href)}">')
+            self._link_stack.append(False)
 
     def _inline_link_close(self, token: Token) -> None:
-        self._output.append("</a>")
+        is_page_link = self._link_stack.pop() if self._link_stack else False
+        if is_page_link:
+            self._output.append("</ac:plain-text-link-body></ac:link>")
+        else:
+            self._output.append("</a>")
 
     def _inline_image(self, token: Token) -> None:
         """Render an image as a Confluence-compatible element.

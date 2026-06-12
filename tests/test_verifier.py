@@ -78,3 +78,44 @@ class TestVerifyAssertions:
         result = verify_assertions(assertions_path=str(f))
         assert result["all_passed"] is False
         assert result["results"][0]["error"] == "Unknown assertion type: unknown.check"
+
+    @patch("confpub.verifier.load_config")
+    @patch("confpub.verifier.ConfluenceClient")
+    def test_parent_assertion_uses_plan_page_id_fallback(self, MockClient, mock_config, tmp_path):
+        assertions_file = tmp_path / "assertions.json"
+        assertions_file.write_text(json.dumps([
+            {
+                "type": "page.parent",
+                "space": "DEV",
+                "title": "Aurora — Live Operations Dashboard",
+                "expected_parent": "Aurora Payments Platform — Team Workspace",
+            }
+        ]), encoding="utf-8")
+        plan_file = tmp_path / "plan.json"
+        plan_file.write_text(json.dumps({
+            "schema_version": "1.0",
+            "space": "DEV",
+            "parent": "Root",
+            "pages": [
+                {
+                    "id": "plan_1",
+                    "title": "Aurora — Live Operations Dashboard",
+                    "source_file": "dashboard.md",
+                    "confluence_page_id": "984911680",
+                    "operation": "update",
+                }
+            ],
+        }), encoding="utf-8")
+        mock_client = MagicMock()
+        mock_client.get_page.return_value = None
+        mock_client.get_page_by_id.return_value = {"id": "984911680", "title": "Aurora — Live Operations Dashboard"}
+        mock_client.get_page_ancestors.return_value = [
+            {"id": "984878986", "title": "Aurora Payments Platform — Team Workspace"}
+        ]
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = verify_assertions(assertions_path=str(assertions_file), plan_path=str(plan_file))
+
+        assert result["all_passed"] is True
+        mock_client.get_page_by_id.assert_called_once_with("984911680")

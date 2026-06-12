@@ -13,7 +13,7 @@ from typing import Any
 from confpub.assets import discover_assets, discover_html_macro_warnings, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
 from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient, build_page_url
-from confpub.converter import convert_markdown, fingerprint_content
+from confpub.converter import convert_markdown, detect_unconverted_page_title_links, fingerprint_content
 from confpub.errors import (
     ERR_IO_FILE_NOT_FOUND,
     ERR_VALIDATION_REQUIRED,
@@ -153,6 +153,7 @@ def publish_page(
     # Discover assets (including script/link refs in ::: html blocks)
     assets = discover_assets(md_text, source_path.parent)
     html_macro_warnings = discover_html_macro_warnings(md_text, source_path.parent)
+    warnings = html_macro_warnings + detect_unconverted_page_title_links(md_text)
 
     # Determine operation
     operation = "update" if existing_page_id else "create"
@@ -182,7 +183,7 @@ def publish_page(
         if labels:
             change["labels_to_apply"] = labels
 
-        warnings: list[str] = list(html_macro_warnings)
+        warnings = list(warnings)
         parent_page = client.get_page(space, parent)
         if not parent_page:
             warnings.append(f"Parent page '{parent}' not found in space '{space}' — publish will fail")
@@ -297,6 +298,6 @@ def publish_page(
         "changes": [change],
         "summary": {operation: 1, "attachments_upload": len(uploaded_attachments)},
     }
-    if html_macro_warnings:
-        result_out["warnings"] = html_macro_warnings
+    if warnings:
+        result_out["warnings"] = warnings
     return result_out

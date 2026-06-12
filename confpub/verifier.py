@@ -15,6 +15,26 @@ from confpub.confluence import ConfluenceClient
 from confpub.errors import ERR_IO_FILE_NOT_FOUND, ERR_VALIDATION_MANIFEST, ConfpubError
 
 
+def _load_plan_page_ids(plan_path: str | None) -> dict[str, str]:
+    """Load title to page-id mappings from a plan artifact when available."""
+    if not plan_path:
+        return {}
+    p = Path(plan_path)
+    if not p.exists():
+        return {}
+    try:
+        plan_data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    page_ids: dict[str, str] = {}
+    for page in plan_data.get("pages", []):
+        title = page.get("title")
+        page_id = page.get("confluence_page_id")
+        if title and page_id:
+            page_ids[str(title)] = str(page_id)
+    return page_ids
+
+
 def _load_assertions(assertions_path: str | None, plan_path: str | None) -> list[dict[str, Any]]:
     """Load assertions from a file or extract from a plan's manifest."""
     if assertions_path:
@@ -96,6 +116,7 @@ def verify_assertions(
 
     results: list[dict[str, Any]] = []
     all_passed = True
+    plan_page_ids = _load_plan_page_ids(plan_path)
 
     for assertion in assertions:
         a_type = assertion.get("type", "")
@@ -106,6 +127,8 @@ def verify_assertions(
             title = assertion.get("title", "")
             result["title"] = title
             page = client.get_page(space, title)
+            if not page and title in plan_page_ids:
+                page = client.get_page_by_id(plan_page_ids[title])
             result["passed"] = page is not None
             if not result["passed"]:
                 all_passed = False
@@ -116,7 +139,11 @@ def verify_assertions(
             expected_parent = assertion.get("expected_parent", "")
             result["title"] = title
             result["expected_parent"] = expected_parent
-            page = client.get_page(space, title) if space else None
+            page = None
+            if title in plan_page_ids:
+                page = client.get_page_by_id(plan_page_ids[title])
+            if not page:
+                page = client.get_page(space, title) if space else None
             if page:
                 ancestors = client.get_page_ancestors(str(page["id"]))
                 actual_parent = ancestors[-1].get("title", "") if ancestors else ""

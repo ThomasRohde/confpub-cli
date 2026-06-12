@@ -43,6 +43,22 @@ Manifest publishing can also use `assets:` globs for extra files.
 
 ```javascript
 (function () {
+  var LOADER_NAME = "loader.js";
+  var SELF = (document.currentScript && document.currentScript.src) || "";
+  if (!SELF) {
+    var scripts = document.getElementsByTagName("script");
+    for (var i = scripts.length - 1; i >= 0; i--) {
+      if (scripts[i].src && scripts[i].src.indexOf(LOADER_NAME) !== -1) {
+        SELF = scripts[i].src;
+        break;
+      }
+    }
+  }
+  if (!SELF) {
+    throw new Error("Cannot find " + LOADER_NAME + " attachment URL");
+  }
+  var base = SELF.replace(/loader\.js(\?.*)?$/, "");
+
   var root = document.getElementById("widget");
   root.textContent = "Waiting for data...";
 
@@ -54,7 +70,6 @@ Manifest publishing can also use `assets:` globs for extra files.
     root.textContent = "Data failed: " + message;
   };
 
-  var base = document.currentScript.src.replace(/loader\.js.*$/, "");
   var script = document.createElement("script");
   script.src = base + "data.js";
   script.onload = function () {
@@ -84,10 +99,22 @@ Manifest publishing can also use `assets:` globs for extra files.
 }());
 ```
 
-The `document.currentScript.src` line derives the page attachment base URL without hardcoding a page ID:
+Capture the loader URL synchronously at the top of the script before any deferred handler runs:
 
 ```javascript
-var base = document.currentScript.src.replace(/loader\.js.*$/, "");
+var LOADER_NAME = "loader.js";
+var SELF = (document.currentScript && document.currentScript.src) || "";
+if (!SELF) {
+  var scripts = document.getElementsByTagName("script");
+  for (var i = scripts.length - 1; i >= 0; i--) {
+    if (scripts[i].src && scripts[i].src.indexOf(LOADER_NAME) !== -1) {
+      SELF = scripts[i].src;
+      break;
+    }
+  }
+}
+if (!SELF) throw new Error("Cannot find " + LOADER_NAME + " attachment URL");
+var base = SELF.replace(/loader\.js(\?.*)?$/, "");
 ```
 
 If `loader.js` was loaded from:
@@ -101,6 +128,8 @@ then `base + "data.js"` points at the sibling attachment:
 ```text
 https://example.atlassian.net/wiki/download/attachments/123456/data.js
 ```
+
+Do not read `document.currentScript` inside `DOMContentLoaded`, `setTimeout`, `onload`, or another deferred callback; it is `null` there. Do not fall back to the last `<script>` element in a Forge macro. Forge apps can append platform scripts after yours, so match your loader by filename and fail loudly if it cannot be found.
 
 ## Same-Macro Inline Config
 

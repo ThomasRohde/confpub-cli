@@ -129,3 +129,65 @@ class TestCreatePlan:
         expected = str(manifest_dir / "confpub-plan.json")
         assert result["plan_file"] == expected
         assert Path(expected).exists()
+
+    @patch("confpub.planner.load_config")
+    @patch("confpub.planner.ConfluenceClient")
+    def test_overwrites_existing_plan_file(self, MockClient, mock_config, manifest_dir, mock_client):
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+        plan_file = manifest_dir / "confpub-plan.json"
+        plan_file.write_text('{"stale": true}', encoding="utf-8")
+
+        result = create_plan(manifest_path=str(manifest_dir / "confpub.yaml"))
+
+        assert result["plan_file"] == str(plan_file)
+        data = json.loads(plan_file.read_text(encoding="utf-8"))
+        assert data["space"] == "DEV"
+        assert "stale" not in data
+
+    @patch("confpub.planner.load_config")
+    @patch("confpub.planner.ConfluenceClient")
+    def test_lockfile_matching_fingerprint_reports_noop(self, MockClient, mock_config, manifest_dir, mock_client):
+        from confpub.converter import convert_markdown, fingerprint_content
+        from confpub.lockfile import Lockfile, LockPageEntry, save_lockfile
+
+        md_text = (manifest_dir / "overview.md").read_text(encoding="utf-8")
+        lock = Lockfile()
+        lock.pages["Overview"] = LockPageEntry(
+            page_id="page_123",
+            version=1,
+            content_fingerprint=fingerprint_content(convert_markdown(md_text)),
+        )
+        save_lockfile(manifest_dir / "confpub.lock", lock)
+
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = create_plan(
+            manifest_path=str(manifest_dir / "confpub.yaml"),
+            output_path=str(manifest_dir / "plan.json"),
+        )
+
+        assert result["summary"]["noop"] == 1
+        plan = json.loads((manifest_dir / "plan.json").read_text(encoding="utf-8"))
+        overview = next(p for p in plan["pages"] if p["title"] == "Overview")
+        assert overview["operation"] == "noop"
+        assert overview["confluence_page_id"] == "page_123"
+
+    @patch("confpub.planner.load_config")
+    @patch("confpub.planner.ConfluenceClient")
+    def test_warns_for_unparsed_page_title_links(self, MockClient, mock_config, manifest_dir, mock_client):
+        (manifest_dir / "overview.md").write_text(
+            "# Overview\n\n[Dashboard](Aurora — Live Operations Dashboard)",
+            encoding="utf-8",
+        )
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        result = create_plan(
+            manifest_path=str(manifest_dir / "confpub.yaml"),
+            output_path=str(manifest_dir / "plan.json"),
+        )
+
+        assert "warnings" in result
+        assert "may publish as literal Markdown" in result["warnings"][0]

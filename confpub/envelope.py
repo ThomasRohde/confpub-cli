@@ -5,6 +5,7 @@ Every confpub command returns exactly one Envelope on stdout.
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -22,6 +23,19 @@ def generate_request_id() -> str:
     now = datetime.now(timezone.utc)
     suffix = uuid.uuid4().hex[:8]
     return f"req_{now:%Y%m%d}_{now:%H%M%S}_{suffix}"
+
+
+def _json_safe(value: Any) -> Any:
+    """Return a JSON-safe value, replacing non-finite floats with null."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 class ErrorDetail(BaseModel):
@@ -99,7 +113,7 @@ class Envelope(BaseModel):
         opts = orjson.OPT_NON_STR_KEYS
         if indent:
             opts |= orjson.OPT_INDENT_2
-        return orjson.dumps(self.model_dump(mode="json"), option=opts)
+        return orjson.dumps(_json_safe(self.model_dump(mode="json")), option=opts)
 
     def to_json_str(self, *, indent: bool = True) -> str:
         """Serialize to JSON string."""

@@ -493,6 +493,7 @@ def page_publish(
             html_macro_forge_context_ids=effective_html_macro_forge_context_ids,
             html_macro_forge_account_id=effective_html_macro_forge_account_id,
         )
+        ctx.warnings.extend(result.pop("warnings", []))
         ctx.result = result
         if not dry_run:
             # Extract page IDs from publish changes
@@ -710,6 +711,7 @@ def plan_create(
             html_macro_forge_context_ids=html_macro_forge_context_ids,
             html_macro_forge_account_id=html_macro_forge_account_id,
         )
+        ctx.warnings.extend(result.pop("warnings", []))
         ctx.result = result
 
 
@@ -758,6 +760,7 @@ def plan_apply(
             html_macro_forge_context_ids=html_macro_forge_context_ids,
             html_macro_forge_account_id=html_macro_forge_account_id,
         )
+        ctx.warnings.extend(result.pop("warnings", []))
         ctx.result = result
 
 

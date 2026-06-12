@@ -1,6 +1,12 @@
 """Tests for confpub.converter module."""
 
-from confpub.converter import convert_markdown, extract_front_matter, extract_h1_title, fingerprint_content
+from confpub.converter import (
+    convert_markdown,
+    detect_unconverted_page_title_links,
+    extract_front_matter,
+    extract_h1_title,
+    fingerprint_content,
+)
 
 
 class TestHeadings:
@@ -65,6 +71,20 @@ class TestLinks:
         assert '<a href="https://example.com">' in result
         assert "Example" in result
         assert "</a>" in result
+
+    def test_page_title_link(self):
+        result = convert_markdown("[Overview](Overview)")
+        assert '<ac:link><ri:page ri:content-title="Overview" />' in result
+        assert "<ac:plain-text-link-body>Overview</ac:plain-text-link-body>" in result
+
+    def test_page_title_link_with_escaped_spaces(self):
+        result = convert_markdown("[Dashboard](<Aurora — Live Operations Dashboard>)")
+        assert 'ri:content-title="Aurora — Live Operations Dashboard"' in result
+
+    def test_warns_for_bare_page_title_link_with_spaces(self):
+        warnings = detect_unconverted_page_title_links("[Dashboard](Aurora — Live Operations Dashboard)")
+        assert len(warnings) == 1
+        assert "may publish as literal Markdown" in warnings[0]
 
 
 class TestImages:

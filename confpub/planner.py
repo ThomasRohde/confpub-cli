@@ -16,7 +16,7 @@ from typing import Any
 from confpub.assets import discover_assets
 from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient
-from confpub.converter import convert_markdown, fingerprint_content
+from confpub.converter import convert_markdown, detect_unconverted_page_title_links, fingerprint_content
 from confpub.errors import ERR_IO_FILE_NOT_FOUND, ERR_VALIDATION_REQUIRED, ConfpubError
 from confpub.lockfile import load_lockfile
 from confpub.manifest import (
@@ -80,6 +80,7 @@ def create_plan(
     # Build plan pages
     plan_pages: list[PlanPage] = []
     counts = {"create": 0, "update": 0, "noop": 0, "attachments_to_upload": 0, "labels_to_apply": 0}
+    warnings: list[str] = []
 
     for i, fp in enumerate(flat_pages):
         plan_id = f"plan_{i + 1}"
@@ -97,6 +98,8 @@ def create_plan(
 
         # Read and convert markdown
         md_text = source_path.read_text(encoding="utf-8")
+        for warning in detect_unconverted_page_title_links(md_text):
+            warnings.append(f"{fp.file}: {warning}")
         storage = convert_markdown(
             md_text,
             html_macro_name=html_macro_settings.name,
@@ -117,15 +120,21 @@ def create_plan(
 
         # Check lockfile first
         if lockfile and fp.title in lockfile.pages:
-            page_id = lockfile.pages[fp.title].page_id
-            remote_fp = client.fingerprint_page(page_id)
-            if remote_fp is not None:
+            entry = lockfile.pages[fp.title]
+            page_id = entry.page_id
+            if entry.content_fingerprint and entry.content_fingerprint == local_fingerprint:
                 confluence_page_id = page_id
-                current_fingerprint = remote_fp
-                if remote_fp == local_fingerprint:
-                    operation = "noop"
-                else:
-                    operation = "update"
+                current_fingerprint = entry.content_fingerprint
+                operation = "noop"
+            else:
+                remote_fp = client.fingerprint_page(page_id)
+                if remote_fp is not None:
+                    confluence_page_id = page_id
+                    current_fingerprint = remote_fp
+                    if remote_fp == local_fingerprint:
+                        operation = "noop"
+                    else:
+                        operation = "update"
 
         # If not in lockfile, try title search
         if confluence_page_id is None:
@@ -177,7 +186,7 @@ def create_plan(
     if output_path is None:
         output_path = str(manifest_dir / "confpub-plan.json")
 
-    plan_json = json.dumps(plan.model_dump(mode="json"), indent=2)
+    plan_json = json.dumps(plan.model_dump(mode="json"), indent=2, allow_nan=False)
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -186,7 +195,7 @@ def create_plan(
     try:
         with os.fdopen(fd, "w") as f:
             f.write(plan_json)
-        os.rename(tmp, str(out_path))
+        os.replace(tmp, str(out_path))
     except Exception:
         try:
             os.unlink(tmp)
@@ -194,7 +203,10 @@ def create_plan(
             pass
         raise
 
-    return {
+    result = {
         "plan_file": str(out_path),
         "summary": counts,
     }
+    if warnings:
+        result["warnings"] = warnings
+    return result

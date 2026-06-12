@@ -48,6 +48,22 @@ html_macro_forge_account_id: ACCOUNT_ID
 
 ```javascript
 (function () {
+  var SCRIPT_NAME = "widget.js";
+  var SELF = (document.currentScript && document.currentScript.src) || "";
+  if (!SELF) {
+    var scripts = document.getElementsByTagName("script");
+    for (var i = scripts.length - 1; i >= 0; i--) {
+      if (scripts[i].src && scripts[i].src.indexOf(SCRIPT_NAME) !== -1) {
+        SELF = scripts[i].src;
+        break;
+      }
+    }
+  }
+  if (!SELF) {
+    throw new Error("Cannot find " + SCRIPT_NAME + " attachment URL");
+  }
+  var base = SELF.replace(/widget\.js(\?.*)?$/, "");
+
   var config = JSON.parse(document.getElementById("fw-config").textContent);
   var title = document.getElementById("fw-title");
   var rows = document.getElementById("fw-rows");
@@ -83,7 +99,6 @@ html_macro_forge_account_id: ACCOUNT_ID
     action.textContent = "selected " + button.getAttribute("data-name");
   });
 
-  var base = document.currentScript.src.replace(/widget\.js.*$/, "");
   var script = document.createElement("script");
   script.src = base + "data.js";
   script.onload = function () {
@@ -101,6 +116,8 @@ html_macro_forge_account_id: ACCOUNT_ID
 ## Data
 
 `data.js` is loaded at runtime by `widget.js`, so `confpub page publish` does not auto-upload it. Upload it separately or include it in manifest `assets:`.
+
+The script captures `document.currentScript` synchronously and falls back by matching `widget.js` by filename. Do not derive the base URL inside `DOMContentLoaded`, `setTimeout`, or `onload`, and do not use the last `<script>` element as a fallback in Forge iframes.
 
 ```javascript
 window.__widgetDataReady({

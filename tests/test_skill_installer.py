@@ -223,12 +223,15 @@ class TestInstalledSkillContent:
 
         assert "`fetch()` / XHR to Confluence attachment URLs is blocked" in data_ref
         assert "confpub attachment upload data.js --page-id PAGE_ID" in data_ref
-        assert "document.currentScript.src.replace(/loader\\.js.*$/, \"\")" in data_ref
+        assert 'var SELF = (document.currentScript && document.currentScript.src) || ""' in data_ref
+        assert "indexOf(LOADER_NAME)" in data_ref
+        assert "Do not fall back to the last `<script>` element" in data_ref
         assert "window.__dataReady(payload)" in data_ref
 
         assert "Forge HTML Widget Pattern" in widget_ref
         assert "html_macro_format: forge-adf-extension" in widget_ref
         assert "window.__widgetDataReady" in widget_ref
+        assert "indexOf(SCRIPT_NAME)" in widget_ref
         assert "Data source:" in widget_ref
         assert "Last action:" in widget_ref
         assert "confpub attachment upload data.js --page-id PAGE_ID" in widget_ref

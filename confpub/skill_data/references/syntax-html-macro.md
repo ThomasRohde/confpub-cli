@@ -61,13 +61,16 @@ For the complete runtime rules, read `references/forge-html-macro-runtime.md`. F
 Callback data loading uses a sibling attachment URL derived from the script URL:
 
 ```javascript
-var base = document.currentScript.src.replace(/loader\.js.*$/, "");
+var loaderUrl = (document.currentScript && document.currentScript.src) || "";
+var base = loaderUrl.replace(/loader\.js(\?.*)?$/, "");
 var s = document.createElement("script");
 s.src = base + "data.js";
 document.head.appendChild(s);
 ```
 
 `data.js` calls `window.__dataReady(payload)`.
+
+Capture `document.currentScript` synchronously at the top of the loader. It is `null` inside deferred callbacks such as `DOMContentLoaded`, `setTimeout`, or `onload`; production loaders should fall back by matching their own filename, not by taking the last `<script>` element.
 
 ### Iframe Isolation
 

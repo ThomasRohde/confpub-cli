@@ -1,6 +1,7 @@
 """Tests for confpub.envelope module."""
 
 import json
+import math
 import re
 
 from confpub.envelope import Envelope, ErrorDetail, generate_request_id
@@ -115,3 +116,14 @@ class TestEnvelopeSerialization:
         assert isinstance(success["errors"], list)
         assert isinstance(failure["errors"], list)
         assert isinstance(success["warnings"], list)
+
+    def test_non_finite_numbers_are_serialized_as_null(self):
+        env = Envelope.success(
+            "test.cmd",
+            result={"ratio": math.inf, "nested": [math.nan, -math.inf]},
+            metrics={"duration_per_item": math.inf},
+        )
+        parsed = json.loads(env.to_json_bytes())
+        assert parsed["result"]["ratio"] is None
+        assert parsed["result"]["nested"] == [None, None]
+        assert parsed["metrics"]["duration_per_item"] is None
