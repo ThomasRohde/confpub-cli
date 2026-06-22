@@ -263,21 +263,34 @@ class TrustCache:
         """Return all cached page scores as flat dicts for table display."""
         now = datetime.now(timezone.utc).isoformat()
         cur = self._conn.execute(
-            "SELECT page_id, title, space_key, page_version, profile, doc_class, "
+            "SELECT cache_key, page_id, title, space_key, page_version, profile, doc_class, "
             "score_json, created_at, expires_at "
             "FROM page_score_cache ORDER BY created_at DESC"
         )
         results: list[dict[str, Any]] = []
         for row in cur.fetchall():
-            pid, title, space_key, version, profile, doc_class, score_json, created_at, expires_at = row
+            (
+                cache_key,
+                pid,
+                title,
+                space_key,
+                version,
+                profile,
+                doc_class,
+                score_json,
+                created_at,
+                expires_at,
+            ) = row
             try:
                 data = orjson.loads(score_json)
                 results.append({
+                    "cache_key": cache_key,
                     "page_id": pid,
                     "title": title,
                     "space_key": space_key,
                     "page_version": version,
                     "profile": profile,
+                    "doc_class": doc_class,
                     "primary_class": data.get("primary_class", doc_class),
                     "subtype": data.get("subtype"),
                     "lifecycle_state": data.get("lifecycle_state"),
@@ -331,6 +344,7 @@ class TrustCache:
         self,
         *,
         space: str | None = None,
+        cache_key: str | None = None,
         page_id: str | None = None,
         older_than_hours: int | None = None,
         purge_all: bool = False,
@@ -342,6 +356,10 @@ class TrustCache:
         """
         if purge_all:
             cur = self._conn.execute("DELETE FROM page_score_cache")
+        elif cache_key:
+            cur = self._conn.execute(
+                "DELETE FROM page_score_cache WHERE cache_key = ?", (cache_key,)
+            )
         elif page_id:
             cur = self._conn.execute(
                 "DELETE FROM page_score_cache WHERE page_id = ?", (page_id,)

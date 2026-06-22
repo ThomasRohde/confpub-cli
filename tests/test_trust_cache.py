@@ -120,6 +120,31 @@ class TestInspect:
         cache.close()
 
 
+class TestGetAllScores:
+    def test_preserves_duplicate_page_ids_with_unique_cache_keys(self, tmp_path):
+        cache = TrustCache(tmp_path / "test.db")
+        key_v1 = TrustCache.make_cache_key("https://x.net", "111", 1, "official-knowledge", "standard")
+        key_v2 = TrustCache.make_cache_key("https://x.net", "111", 2, "official-knowledge", "standard")
+
+        cache.put_page_score(
+            key_v1, _sample_result(score=70, page_version=1),
+            site_url="https://x.net", page_id="111",
+            page_version=1, profile="official-knowledge", doc_class="standard",
+        )
+        cache.put_page_score(
+            key_v2, _sample_result(score=85, page_version=2),
+            site_url="https://x.net", page_id="111",
+            page_version=2, profile="official-knowledge", doc_class="standard",
+        )
+
+        rows = cache.get_all_scores()
+
+        assert len(rows) == 2
+        assert {row["page_id"] for row in rows} == {"111"}
+        assert {row["cache_key"] for row in rows} == {key_v1, key_v2}
+        cache.close()
+
+
 class TestPurge:
     def test_purge_all(self, tmp_path):
         cache = TrustCache(tmp_path / "test.db")
@@ -149,6 +174,29 @@ class TestPurge:
         result = cache.purge(page_id="111")
         assert result["deleted_count"] == 1
         assert result["remaining_count"] == 1
+        cache.close()
+
+    def test_purge_by_cache_key_removes_one_score_entry(self, tmp_path):
+        cache = TrustCache(tmp_path / "test.db")
+        key_v1 = TrustCache.make_cache_key("https://x.net", "111", 1, "official-knowledge", "standard")
+        key_v2 = TrustCache.make_cache_key("https://x.net", "111", 2, "official-knowledge", "standard")
+        cache.put_page_score(
+            key_v1, _sample_result(page_version=1),
+            site_url="https://x.net", page_id="111",
+            page_version=1, profile="official-knowledge", doc_class="standard",
+        )
+        cache.put_page_score(
+            key_v2, _sample_result(page_version=2),
+            site_url="https://x.net", page_id="111",
+            page_version=2, profile="official-knowledge", doc_class="standard",
+        )
+
+        result = cache.purge(cache_key=key_v1)
+        rows = cache.get_all_scores()
+
+        assert result["deleted_count"] == 1
+        assert result["remaining_count"] == 1
+        assert rows[0]["cache_key"] == key_v2
         cache.close()
 
     def test_purge_no_criteria(self, tmp_path):

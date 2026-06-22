@@ -107,6 +107,22 @@ def _bar(value: float, width: int = 20) -> Text:
     return Text(f"{bar} {value:.2f}", style=color)
 
 
+def _score_entry_row_key(entry: dict, index: int) -> str:
+    """Return a unique DataTable row key for a cached score entry."""
+    cache_key = entry.get("cache_key")
+    if cache_key:
+        return str(cache_key)
+    return "|".join(
+        [
+            str(entry.get("page_id", "")),
+            str(entry.get("page_version", "")),
+            str(entry.get("profile", "")),
+            str(entry.get("doc_class") or entry.get("primary_class", "")),
+            str(index),
+        ]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Detail screen
 # ---------------------------------------------------------------------------
@@ -299,7 +315,7 @@ class ScoreTableScreen(Screen):
         col = self._sort_columns[self._sort_index % len(self._sort_columns)]
         self._entries.sort(key=lambda e: e.get(col, ""), reverse=self._sort_reverse)
 
-        for e in self._entries:
+        for idx, e in enumerate(self._entries):
             band = e["band"]
             title = e.get("title") or ""
             if len(title) > 45:
@@ -315,7 +331,7 @@ class ScoreTableScreen(Screen):
                 e["page_id"],
                 str(e["page_version"]),
                 e.get("scored_at", "")[:16],
-                key=e["page_id"],
+                key=_score_entry_row_key(e, idx),
             )
 
         sort_col = self._sort_columns[self._sort_index % len(self._sort_columns)]
@@ -363,7 +379,10 @@ class ScoreTableScreen(Screen):
         try:
             from confpub.trust.cache import TrustCache
             cache = TrustCache()
-            cache.purge(page_id=entry["page_id"])
+            if entry.get("cache_key"):
+                cache.purge(cache_key=entry["cache_key"])
+            else:
+                cache.purge(page_id=entry["page_id"])
             cache.close()
         except Exception:
             pass
