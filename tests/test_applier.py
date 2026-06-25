@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from confpub.applier import apply_plan
+from confpub.config import ResolvedConfig
 from confpub.errors import ConfpubError, ERR_CONFLICT_FINGERPRINT
 
 
@@ -101,6 +102,18 @@ class TestApplyPlanDryRun:
         apply_plan(str(plan_dir / "plan.json"), dry_run=True)
 
         assert not (plan_dir / "confpub.lock").exists()
+
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_warns_for_cloud_default_classic_html_macro(self, MockClient, mock_config, plan_dir, mock_client):
+        (plan_dir / "new.md").write_text("::: html\n<div>ok</div>\n:::", encoding="utf-8")
+        MockClient.return_value = mock_client
+        mock_config.return_value = ResolvedConfig(base_url="https://test.atlassian.net/wiki")
+
+        result = apply_plan(str(plan_dir / "plan.json"), dry_run=True)
+
+        assert "warnings" in result
+        assert "new.md: This Cloud publish contains ::: html" in result["warnings"][0]
 
 
 class TestApplyPlanReal:

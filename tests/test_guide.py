@@ -21,6 +21,7 @@ class TestBuildGuide:
             "plan.create", "plan.validate", "plan.apply", "plan.verify",
             "auth.inspect",
             "config.set", "config.inspect",
+            "html-macro.detect", "html-macro.adopt",
         ]
         for cmd in expected_commands:
             assert cmd in guide["commands"], f"Missing command: {cmd}"
@@ -35,12 +36,12 @@ class TestBuildGuide:
 
     def test_write_commands_are_mutating(self):
         guide = build_guide()
-        for cmd_id in ("page.publish", "page.delete", "page.move", "plan.apply", "config.set", "label.add", "label.remove", "comment.add"):
+        for cmd_id in ("page.publish", "page.delete", "page.move", "plan.apply", "config.set", "html-macro.adopt", "label.add", "label.remove", "comment.add"):
             assert guide["commands"][cmd_id]["mutates"] is True
 
     def test_read_commands_are_not_mutating(self):
         guide = build_guide()
-        for cmd_id in ("search", "page.list", "page.inspect", "space.list", "plan.validate", "label.list"):
+        for cmd_id in ("search", "page.list", "page.inspect", "space.list", "plan.validate", "html-macro.detect", "label.list"):
             assert guide["commands"][cmd_id]["mutates"] is False
 
     def test_plan_apply_has_safety_flags(self):

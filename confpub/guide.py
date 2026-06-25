@@ -431,6 +431,37 @@ def build_guide() -> dict[str, Any]:
                 "mutates": False,
                 "description": "Show current configuration",
                 "flags": [],
+                "result_schema": {
+                    "html_macro_resolution": (
+                        "Source metadata for effective HTML macro name/format. "
+                        "source=default means the value is an unverified fallback, not a site detection result."
+                    ),
+                },
+            },
+            "html-macro.detect": {
+                "group": "config",
+                "mutates": False,
+                "description": "Detect site-specific HTML macro settings from a working page or best-effort CQL search",
+                "flags": ["--from-page", "--space", "--limit"],
+                "agent_hint": (
+                    "Prefer --from-page with a page containing a known working HTML macro. "
+                    "Without --from-page, detection searches for common macro keys and inspects matching pages, "
+                    "which is best-effort only."
+                ),
+                "result_schema": {
+                    "candidates": "list of detected classic or forge-adf-extension config candidates",
+                    "candidates[].config_commands": "copy-paste confpub config set commands",
+                },
+            },
+            "html-macro.adopt": {
+                "group": "config",
+                "mutates": True,
+                "description": "Persist HTML macro settings detected from a working page",
+                "flags": ["--from-page", "--candidate", "--dry-run"],
+                "agent_hint": (
+                    "Run with --dry-run first when a page may contain multiple HTML macro apps. "
+                    "If multiple candidates are detected, pass --candidate with the 1-based index."
+                ),
             },
             "skill.install": {
                 "group": "skill",

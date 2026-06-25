@@ -16,6 +16,7 @@ from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, detect_unconverted_page_title_links, fingerprint_content
 from confpub.errors import ERR_CONFLICT_FINGERPRINT, ERR_IO_FILE_NOT_FOUND, ConfpubError
+from confpub.html_macro_detection import html_macro_fallback_warnings
 from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, update_lockfile
 from confpub.manifest import PlanArtifact
 from confpub.validator import _load_plan
@@ -140,6 +141,12 @@ def apply_plan(
         # Read and convert
         md_text = source_path.read_text(encoding="utf-8")
         for warning in detect_unconverted_page_title_links(md_text):
+            warnings.append(f"{page.source_file}: {warning}")
+        for warning in html_macro_fallback_warnings(
+            md_text,
+            is_cloud=config.is_cloud,
+            settings=html_macro_settings,
+        ):
             warnings.append(f"{page.source_file}: {warning}")
         storage = convert_markdown(
             md_text,

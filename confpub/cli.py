@@ -89,6 +89,7 @@ page_app = typer.Typer(help="Page operations", callback=_group_callback)
 plan_app = typer.Typer(help="Transactional plan workflow", callback=_group_callback)
 auth_app = typer.Typer(help="Authentication", callback=_group_callback)
 config_app = typer.Typer(help="Configuration", callback=_group_callback)
+html_macro_app = typer.Typer(help="HTML macro detection and adoption", callback=_group_callback)
 space_app = typer.Typer(help="Space operations", callback=_group_callback)
 attachment_app = typer.Typer(help="Attachment operations", callback=_group_callback)
 label_app = typer.Typer(help="Label operations", callback=_group_callback)
@@ -117,6 +118,7 @@ app.add_typer(page_app, name="page")
 app.add_typer(plan_app, name="plan")
 app.add_typer(auth_app, name="auth")
 app.add_typer(config_app, name="config")
+app.add_typer(html_macro_app, name="html-macro")
 app.add_typer(space_app, name="space")
 app.add_typer(attachment_app, name="attachment")
 app.add_typer(label_app, name="label")
@@ -806,6 +808,69 @@ def config_inspect() -> None:
         from confpub.config import load_config
         config = load_config()
         ctx.result = config.to_display_dict()
+
+
+@html_macro_app.command("detect")
+def html_macro_detect(
+    from_page: Optional[str] = typer.Option(None, "--from-page", help="Page ID containing a working HTML macro"),
+    space: Optional[str] = typer.Option(None, "--space", help="Confluence space key for best-effort CQL discovery"),
+    limit: int = typer.Option(10, "--limit", help="Maximum CQL search results to inspect"),
+) -> None:
+    """Detect site-specific HTML macro settings."""
+    with command_context("html-macro.detect", target={"from_page": from_page, "space": space}) as ctx:
+        space = _resolve_space(space)
+        from confpub.confluence import build_client
+        from confpub.html_macro_detection import detect_html_macro_candidates
+
+        client = build_client()
+        ctx.client = client
+        result = detect_html_macro_candidates(
+            client,
+            from_page=from_page,
+            space=space,
+            limit=limit,
+        )
+        if result["candidate_count"] == 0:
+            ctx.warnings.append(
+                "No HTML macro settings detected. Use --from-page with a page that contains a working HTML macro."
+            )
+        ctx.result = result
+
+
+@html_macro_app.command("adopt")
+def html_macro_adopt(
+    from_page: str = typer.Option(..., "--from-page", help="Page ID containing a working HTML macro"),
+    candidate: Optional[int] = typer.Option(None, "--candidate", help="1-based candidate index when several settings are present"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show settings without writing config"),
+) -> None:
+    """Persist HTML macro settings detected from a working page."""
+    with command_context("html-macro.adopt", target={"from_page": from_page}) as ctx:
+        from confpub.config import set_config_value
+        from confpub.confluence import build_client
+        from confpub.html_macro_detection import extract_html_macro_candidates, select_html_macro_candidate
+
+        client = build_client()
+        ctx.client = client
+        page = client.get_page_by_id(from_page)
+        detected = extract_html_macro_candidates(
+            page.get("body", {}).get("storage", {}).get("value", ""),
+            page_id=str(page.get("id") or from_page),
+            title=page.get("title"),
+        )
+        selected = select_html_macro_candidate(detected, candidate_index=candidate)
+        selected_index = detected.index(selected) + 1
+        values = selected.config_values()
+
+        if not dry_run:
+            for key, value in values.items():
+                set_config_value(key, value)
+
+        ctx.result = {
+            "dry_run": dry_run,
+            "adopted": not dry_run,
+            "candidate": selected.to_dict(index=selected_index),
+            "set": values,
+        }
 
 
 # ---------------------------------------------------------------------------

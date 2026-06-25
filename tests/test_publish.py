@@ -250,6 +250,56 @@ class TestPublishCreate:
 
     @patch("confpub.publish.load_config")
     @patch("confpub.publish.ConfluenceClient")
+    def test_warns_for_cloud_default_classic_html_macro(self, MockClient, mock_config, tmp_path, mock_client):
+        md_file = tmp_path / "html.md"
+        md_file.write_text("::: html\n<b>bold</b>\n:::")
+
+        def get_page_side_effect(space, title):
+            if title == "Root":
+                return {"id": "root_1"}
+            return None
+
+        mock_client.get_page.side_effect = get_page_side_effect
+        MockClient.return_value = mock_client
+        mock_config.return_value = ResolvedConfig(base_url="https://test.atlassian.net/wiki")
+
+        result = publish_page(
+            file=str(md_file),
+            space="DEV",
+            parent="Root",
+            dry_run=True,
+        )
+
+        assert "warnings" in result
+        assert "default classic" in result["warnings"][0]
+
+    @patch("confpub.publish.load_config")
+    @patch("confpub.publish.ConfluenceClient")
+    def test_no_warning_for_explicit_classic_html_macro_format(self, MockClient, mock_config, tmp_path, mock_client):
+        md_file = tmp_path / "html.md"
+        md_file.write_text("::: html\n<b>bold</b>\n:::")
+
+        def get_page_side_effect(space, title):
+            if title == "Root":
+                return {"id": "root_1"}
+            return None
+
+        mock_client.get_page.side_effect = get_page_side_effect
+        MockClient.return_value = mock_client
+        mock_config.return_value = ResolvedConfig(base_url="https://test.atlassian.net/wiki")
+
+        result = publish_page(
+            file=str(md_file),
+            space="DEV",
+            parent="Root",
+            dry_run=True,
+            html_macro_format="classic",
+        )
+
+        assert "warnings" not in result
+
+    @patch("confpub.publish.load_config")
+    @patch("confpub.publish.ConfluenceClient")
     def test_updates_lockfile(self, MockClient, mock_config, source_dir, mock_client):
         def get_page_side_effect(space, title):
             if title == "Root":

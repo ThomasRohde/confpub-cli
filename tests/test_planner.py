@@ -8,6 +8,7 @@ import pytest
 
 from confpub.errors import ConfpubError, ERR_IO_FILE_NOT_FOUND
 from confpub.planner import create_plan
+from confpub.config import ResolvedConfig
 
 
 SAMPLE_MANIFEST = """\
@@ -191,3 +192,21 @@ class TestCreatePlan:
 
         assert "warnings" in result
         assert "may publish as literal Markdown" in result["warnings"][0]
+
+    @patch("confpub.planner.load_config")
+    @patch("confpub.planner.ConfluenceClient")
+    def test_warns_for_cloud_default_classic_html_macro(self, MockClient, mock_config, manifest_dir, mock_client):
+        (manifest_dir / "overview.md").write_text(
+            "::: html\n<div>ok</div>\n:::",
+            encoding="utf-8",
+        )
+        MockClient.return_value = mock_client
+        mock_config.return_value = ResolvedConfig(base_url="https://test.atlassian.net/wiki")
+
+        result = create_plan(
+            manifest_path=str(manifest_dir / "confpub.yaml"),
+            output_path=str(manifest_dir / "plan.json"),
+        )
+
+        assert "warnings" in result
+        assert "overview.md: This Cloud publish contains ::: html" in result["warnings"][0]

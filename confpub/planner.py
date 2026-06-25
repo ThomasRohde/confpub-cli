@@ -18,6 +18,7 @@ from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient
 from confpub.converter import convert_markdown, detect_unconverted_page_title_links, fingerprint_content
 from confpub.errors import ERR_IO_FILE_NOT_FOUND, ERR_VALIDATION_REQUIRED, ConfpubError
+from confpub.html_macro_detection import html_macro_fallback_warnings
 from confpub.lockfile import load_lockfile
 from confpub.manifest import (
     FlatPage,
@@ -99,6 +100,12 @@ def create_plan(
         # Read and convert markdown
         md_text = source_path.read_text(encoding="utf-8")
         for warning in detect_unconverted_page_title_links(md_text):
+            warnings.append(f"{fp.file}: {warning}")
+        for warning in html_macro_fallback_warnings(
+            md_text,
+            is_cloud=config.is_cloud,
+            settings=html_macro_settings,
+        ):
             warnings.append(f"{fp.file}: {warning}")
         storage = convert_markdown(
             md_text,

@@ -52,6 +52,8 @@ class HtmlMacroSettings:
 
     name: str
     format: str
+    name_source: str = "default"
+    format_source: str = "default"
     forge_extension_key: str | None = None
     forge_extension_id: str | None = None
     forge_environment: str = DEFAULT_HTML_MACRO_FORGE_ENVIRONMENT
@@ -95,6 +97,8 @@ class ResolvedConfig:
         html_macro_forge_cloud_id: str | None = None,
         html_macro_forge_context_ids: str | None = None,
         html_macro_forge_account_id: str | None = None,
+        html_macro_name_source: str | None = None,
+        html_macro_format_source: str | None = None,
     ) -> None:
         self.base_url = base_url
         self.user = user
@@ -109,6 +113,12 @@ class ResolvedConfig:
         self.html_macro_forge_cloud_id = html_macro_forge_cloud_id
         self.html_macro_forge_context_ids = html_macro_forge_context_ids
         self.html_macro_forge_account_id = html_macro_forge_account_id
+        self.html_macro_name_source = html_macro_name_source or (
+            "configured" if html_macro_name else "default"
+        )
+        self.html_macro_format_source = html_macro_format_source or (
+            "configured" if html_macro_format else "default"
+        )
 
     @property
     def is_cloud(self) -> bool:
@@ -162,6 +172,7 @@ class ResolvedConfig:
 
     def to_display_dict(self) -> dict[str, Any]:
         """Return safe-to-display config (token masked)."""
+        html_macro_resolution = html_macro_resolution_dict(self)
         return {
             "base_url": self.base_url,
             "user": self.user,
@@ -178,6 +189,7 @@ class ResolvedConfig:
             "html_macro_forge_cloud_id": self.html_macro_forge_cloud_id,
             "html_macro_forge_context_ids": self.html_macro_forge_context_ids,
             "html_macro_forge_account_id": self.html_macro_forge_account_id,
+            "html_macro_resolution": html_macro_resolution,
         }
 
 
@@ -270,6 +282,44 @@ def resolve_html_macro_format(config: Any, override: str | None = None) -> str:
     return normalized
 
 
+def resolve_html_macro_name_source(config: Any, override: str | None = None) -> str:
+    """Return where the effective HTML macro name came from."""
+    if _normalize_optional_string(override):
+        return "override"
+    configured = getattr(config, "html_macro_name", None)
+    if isinstance(configured, str) and _normalize_optional_string(configured):
+        return str(getattr(config, "html_macro_name_source", None) or "configured")
+    return "default"
+
+
+def resolve_html_macro_format_source(config: Any, override: str | None = None) -> str:
+    """Return where the effective HTML macro format came from."""
+    if _normalize_optional_string(override):
+        return "override"
+    configured = getattr(config, "html_macro_format", None)
+    if isinstance(configured, str) and _normalize_optional_string(configured):
+        return str(getattr(config, "html_macro_format_source", None) or "configured")
+    return "default"
+
+
+def html_macro_resolution_dict(config: Any) -> dict[str, Any]:
+    """Return display metadata that distinguishes defaults from configured values."""
+    name_source = resolve_html_macro_name_source(config)
+    format_source = resolve_html_macro_format_source(config)
+    return {
+        "name": {
+            "value": resolve_html_macro_name(config),
+            "source": name_source,
+            "site_verified": False,
+        },
+        "format": {
+            "value": resolve_html_macro_format(config),
+            "source": format_source,
+            "site_verified": False,
+        },
+    }
+
+
 def _resolve_configured_string(config: Any, attr: str, override: str | None = None) -> str | None:
     override_value = _normalize_optional_string(override)
     if override_value:
@@ -295,6 +345,8 @@ def resolve_html_macro_settings(
     """Resolve and validate all HTML macro rendering settings."""
     name = resolve_html_macro_name(config, name_override)
     macro_format = resolve_html_macro_format(config, format_override)
+    name_source = resolve_html_macro_name_source(config, name_override)
+    format_source = resolve_html_macro_format_source(config, format_override)
     forge_extension_key = _resolve_configured_string(
         config, "html_macro_forge_extension_key", forge_extension_key_override,
     )
@@ -339,6 +391,8 @@ def resolve_html_macro_settings(
     return HtmlMacroSettings(
         name=name,
         format=macro_format,
+        name_source=name_source,
+        format_source=format_source,
         forge_extension_key=forge_extension_key,
         forge_extension_id=forge_extension_id,
         forge_environment=forge_environment,
@@ -369,13 +423,17 @@ def load_config(
     ssl_verify = _resolve_ssl_verify(ssl_raw)
 
     # HTML macro name (for ::: html blocks)
-    html_macro_name = (
-        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_NAME))
-        or _normalize_optional_string(file_cfg.html_macro_name)
+    env_html_macro_name = _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_NAME))
+    file_html_macro_name = _normalize_optional_string(file_cfg.html_macro_name)
+    html_macro_name = env_html_macro_name or file_html_macro_name
+    html_macro_name_source = (
+        "env_var" if env_html_macro_name else "config_file" if file_html_macro_name else "default"
     )
-    html_macro_format = (
-        _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORMAT))
-        or _normalize_optional_string(file_cfg.html_macro_format)
+    env_html_macro_format = _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORMAT))
+    file_html_macro_format = _normalize_optional_string(file_cfg.html_macro_format)
+    html_macro_format = env_html_macro_format or file_html_macro_format
+    html_macro_format_source = (
+        "env_var" if env_html_macro_format else "config_file" if file_html_macro_format else "default"
     )
     html_macro_forge_extension_key = (
         _normalize_optional_string(os.environ.get(ENV_HTML_MACRO_FORGE_EXTENSION_KEY))
@@ -432,6 +490,8 @@ def load_config(
         html_macro_forge_cloud_id=html_macro_forge_cloud_id,
         html_macro_forge_context_ids=html_macro_forge_context_ids,
         html_macro_forge_account_id=html_macro_forge_account_id,
+        html_macro_name_source=html_macro_name_source,
+        html_macro_format_source=html_macro_format_source,
     )
 
 

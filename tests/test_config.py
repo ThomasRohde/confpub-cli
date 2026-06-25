@@ -83,6 +83,10 @@ class TestResolvedConfig:
         assert d["html_macro_name"] is None
         assert d["effective_html_macro_name"] == "html-macro"
         assert d["effective_html_macro_format"] == "classic"
+        assert d["html_macro_resolution"]["name"]["source"] == "default"
+        assert d["html_macro_resolution"]["name"]["site_verified"] is False
+        assert d["html_macro_resolution"]["format"]["source"] == "default"
+        assert d["html_macro_resolution"]["format"]["site_verified"] is False
 
 
 class TestLoadConfig:
@@ -112,6 +116,8 @@ class TestLoadConfig:
         assert cfg.token_source == "env_var"
         assert cfg.html_macro_name == "html-macro"
         assert cfg.html_macro_format == "forge-adf-extension"
+        assert cfg.html_macro_name_source == "env_var"
+        assert cfg.html_macro_format_source == "env_var"
         assert cfg.html_macro_forge_extension_key == "app/static/macro-html"
         assert cfg.html_macro_forge_extension_id == "ari:cloud:ecosystem::extension/app/static/macro-html"
         assert cfg.html_macro_forge_cloud_id == "cloud-123"
@@ -215,6 +221,7 @@ class TestHtmlMacroNameResolution:
         cfg = load_config()
 
         assert cfg.html_macro_name == "html-macro"
+        assert cfg.html_macro_name_source == "config_file"
         assert resolve_html_macro_name(cfg) == "html-macro"
 
 

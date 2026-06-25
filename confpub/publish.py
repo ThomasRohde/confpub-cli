@@ -20,6 +20,7 @@ from confpub.errors import (
     ERR_VALIDATION_SPACE_MISMATCH,
     ConfpubError,
 )
+from confpub.html_macro_detection import html_macro_fallback_warnings
 from confpub.lockfile import Lockfile, load_lockfile, save_lockfile, update_lockfile
 
 
@@ -153,7 +154,15 @@ def publish_page(
     # Discover assets (including script/link refs in ::: html blocks)
     assets = discover_assets(md_text, source_path.parent)
     html_macro_warnings = discover_html_macro_warnings(md_text, source_path.parent)
-    warnings = html_macro_warnings + detect_unconverted_page_title_links(md_text)
+    warnings = (
+        html_macro_warnings
+        + detect_unconverted_page_title_links(md_text)
+        + html_macro_fallback_warnings(
+            md_text,
+            is_cloud=config.is_cloud,
+            settings=html_macro_settings,
+        )
+    )
 
     # Determine operation
     operation = "update" if existing_page_id else "create"
