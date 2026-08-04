@@ -5,7 +5,6 @@ Provides a clean interface that translates library exceptions into ConfpubError.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from typing import Any
@@ -888,7 +887,8 @@ class ConfluenceClient:
         try:
             page = self._api.get_page_by_id(page_id, expand="body.storage")
             body = page.get("body", {}).get("storage", {}).get("value", "")
-            return hashlib.sha256(body.encode("utf-8")).hexdigest()
+            from confpub.converter import fingerprint_content
+            return fingerprint_content(body)
         except Exception:
             return None
 

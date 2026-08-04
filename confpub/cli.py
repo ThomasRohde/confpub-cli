@@ -90,6 +90,7 @@ plan_app = typer.Typer(help="Transactional plan workflow", callback=_group_callb
 auth_app = typer.Typer(help="Authentication", callback=_group_callback)
 config_app = typer.Typer(help="Configuration", callback=_group_callback)
 html_macro_app = typer.Typer(help="HTML macro detection and adoption", callback=_group_callback)
+macro_app = typer.Typer(help="Learn and use site-specific Confluence macros", callback=_group_callback)
 space_app = typer.Typer(help="Space operations", callback=_group_callback)
 attachment_app = typer.Typer(help="Attachment operations", callback=_group_callback)
 label_app = typer.Typer(help="Label operations", callback=_group_callback)
@@ -119,6 +120,7 @@ app.add_typer(plan_app, name="plan")
 app.add_typer(auth_app, name="auth")
 app.add_typer(config_app, name="config")
 app.add_typer(html_macro_app, name="html-macro")
+app.add_typer(macro_app, name="macro")
 app.add_typer(space_app, name="space")
 app.add_typer(attachment_app, name="attachment")
 app.add_typer(label_app, name="label")
@@ -352,7 +354,12 @@ def page_inspect(
             result["labels"] = labels
             if format == "markdown" and "body_storage" in result:
                 from confpub.reverse_converter import convert_storage_to_markdown
-                conversion = convert_storage_to_markdown(result["body_storage"])
+                from confpub.config import load_config
+                from confpub.macro_profiles import load_macro_profiles
+                conversion = convert_storage_to_markdown(
+                    result["body_storage"],
+                    macro_profiles=load_macro_profiles(load_config().base_url),
+                )
                 result["body_markdown"] = conversion.markdown
                 del result["body_storage"]
                 if conversion.warnings:
@@ -870,6 +877,65 @@ def html_macro_adopt(
             "adopted": not dry_run,
             "candidate": selected.to_dict(index=selected_index),
             "set": values,
+        }
+
+
+@macro_app.command("inspect")
+def macro_inspect(
+    from_page: str = typer.Option(..., "--from-page", help="Page ID containing one or more working macros"),
+) -> None:
+    """Inspect and classify macros from a known-good page."""
+    with command_context("macro.inspect", target={"from_page": from_page}) as ctx:
+        from confpub.confluence import build_client
+        from confpub.macro_profiles import detect_macro_candidates
+
+        client = build_client()
+        ctx.client = client
+        result = detect_macro_candidates(client, from_page)
+        if result["candidate_count"] == 0:
+            ctx.warnings.append("No macros were found on the source page.")
+        ctx.result = result
+
+
+@macro_app.command("learn")
+def macro_learn(
+    from_page: str = typer.Option(..., "--from-page", help="Page ID containing a working macro"),
+    alias: str = typer.Option(..., "--alias", help="Stable local alias used in {macro:alias|...} syntax"),
+    candidate: Optional[int] = typer.Option(None, "--candidate", help="1-based candidate index when several macros are present"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the learned profile without persisting it"),
+) -> None:
+    """Learn and persist a site-scoped macro profile from a known-good page."""
+    with command_context("macro.learn", target={"from_page": from_page, "alias": alias}) as ctx:
+        from confpub.config import load_config
+        from confpub.confluence import build_client
+        from confpub.macro_profiles import learn_macro_profile
+
+        config = load_config()
+        client = build_client()
+        ctx.client = client
+        ctx.result = learn_macro_profile(
+            client,
+            base_url=config.base_url or "",
+            from_page=from_page,
+            alias=alias,
+            candidate_index=candidate,
+            dry_run=dry_run,
+        )
+
+
+@macro_app.command("list")
+def macro_list() -> None:
+    """List learned macro profiles for the configured Confluence site."""
+    with command_context("macro.list") as ctx:
+        from confpub.config import load_config
+        from confpub.macro_profiles import load_macro_profiles
+
+        config = load_config()
+        profiles = load_macro_profiles(config.base_url)
+        ctx.result = {
+            "base_url": config.base_url,
+            "profile_count": len(profiles),
+            "profiles": [profile.to_display_dict() for profile in profiles.values()],
         }
 
 

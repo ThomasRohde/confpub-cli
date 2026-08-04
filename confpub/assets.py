@@ -16,7 +16,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-
 class AssetRef(BaseModel):
     """A reference to a local asset file."""
 
@@ -31,6 +30,19 @@ class UploadedAsset(BaseModel):
     source_path: str
     filename: str
     confluence_attachment_id: str | None = None
+
+
+def merge_assets(*groups: list[AssetRef]) -> list[AssetRef]:
+    """Merge asset groups by resolved path while preserving discovery order."""
+    merged: list[AssetRef] = []
+    seen: set[str] = set()
+    for group in groups:
+        for asset in group:
+            if asset.resolved_path in seen:
+                continue
+            seen.add(asset.resolved_path)
+            merged.append(asset)
+    return merged
 
 
 # Regex to find image references in markdown
@@ -58,7 +70,6 @@ _ADF_BODY_CONTENT_RE = re.compile(
     r'(<ac:adf-parameter key="__body-content">)(.*?)(</ac:adf-parameter>)',
     re.DOTALL,
 )
-
 
 def _is_local_path(src: str) -> bool:
     """Check if a path is a local file reference (not a URL)."""

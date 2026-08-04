@@ -2,6 +2,31 @@
 
 Generic macro syntax: `{macro-name:positional-param|key=value|key2=value2}`
 
+## Learned Site-Specific Macros
+
+Marketplace and Forge apps can register different macro names and storage shapes on each Confluence site. Never guess a diagramming macro from its display name. Learn it from a known-good page using confpub itself:
+
+```bash
+confpub macro inspect --from-page <WORKING_PAGE_ID>
+confpub macro learn --from-page <WORKING_PAGE_ID> --alias mermaid --dry-run
+confpub macro learn --from-page <WORKING_PAGE_ID> --alias mermaid
+confpub macro list
+```
+
+`macro inspect` classifies classic structured macros, attachment-backed macros, plain-text and rich-text bodies, and Forge ADF extensions. `macro learn` persists the selected contract under the configured Confluence URL, so another site can use the same alias with a different underlying app.
+
+Invoke the learned profile with an explicit local source file:
+
+```markdown
+{macro:mermaid|source=diagrams/checkout-flow}
+```
+
+For attachment-backed macros, confpub uploads the source file and sets the learned attachment parameter to its basename. For plain-text, rich-text, and Forge body macros, confpub reads the UTF-8 source into the learned body shape. Body-less macros do not require `source`.
+
+On `page pull`, attachment-backed sources reuse the downloaded attachment path. Embedded classic and Forge bodies are extracted into `assets/.../macro-sources/` and the generated `{macro:alias|source=...}` invocation points to that file, preserving the publish round-trip.
+
+Use `--candidate N` when the sample page contains more than one macro. Keep the source file basename stable for attachment-backed apps, dry-run before publishing, and verify the browser-rendered page after publishing. Storage validity alone does not prove a Marketplace or Forge macro rendered successfully.
+
 ## Status Lozenges
 
 Colored pills for governance state, lifecycle, priority. Work **inline** — embed in table cells, headings, paragraphs.

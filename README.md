@@ -439,8 +439,30 @@ confpub converts Markdown to Confluence Storage Format (and back via `page pull`
 | `{recently-updated}` | Recently Updated macro |
 | `{excerpt-include:Page}` | Excerpt Include macro |
 | `{include:Page}` | Include Page macro |
+| `{macro:alias\|source=local-file}` | Site-specific macro learned from a working page |
 | `::: excerpt` | Excerpt macro (body) |
 | `::: html` | HTML macro (preserves `<style>`, `<script>`, `<iframe>`) |
+
+### Learn site-specific macros
+
+Confluence Marketplace and Forge apps can use different macro keys and storage shapes on different sites. Learn the actual contract from a known-good page instead of hardcoding the app:
+
+```bash
+confpub macro inspect --from-page 123456
+confpub macro learn --from-page 123456 --alias mermaid --dry-run
+confpub macro learn --from-page 123456 --alias mermaid
+confpub macro list
+```
+
+Then reference a local UTF-8 source file:
+
+```markdown
+{macro:mermaid|source=diagrams/checkout-flow}
+```
+
+The profile is scoped to the configured Confluence URL. Attachment-backed profiles upload the source automatically; classic body and Forge ADF profiles embed it in the learned body shape. Verify the rendered page after publishing because successful storage does not prove a third-party macro executed correctly.
+
+`page pull` preserves the same abstraction: attachment-backed sources point to downloaded attachments, while embedded classic or Forge bodies are extracted into local `macro-sources` files.
 
 ---
 

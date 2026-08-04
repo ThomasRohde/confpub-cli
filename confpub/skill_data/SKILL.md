@@ -90,6 +90,7 @@ The essentials — for full syntax with examples, see the routing table below.
 | Jira link | `{jira:PROJ-123}` |
 | Jira query | `{jira:jql=project=PROJ AND status=Open}` |
 | Include page | `{include:Page Title}` |
+| Learned site macro | `{macro:alias\|source=local-file}` |
 | Page link | `[text](Page Title)` |
 | HTML block | `::: html` ... `:::` |
 
@@ -129,7 +130,7 @@ When the user asks about specific confpub features or needs detailed syntax:
 | User Intent | Read |
 |-------------|------|
 | Panels, expand blocks, admonitions, excerpts | `references/syntax-containers.md` |
-| Status lozenges, TOC, children, Jira, anchors, includes | `references/syntax-macros.md` |
+| Status lozenges, TOC, children, Jira, anchors, includes, learned Marketplace macros | `references/syntax-macros.md` |
 | Code blocks, math, footnotes, definition lists, task lists, front-matter | `references/syntax-formatting.md` |
 | Raw HTML embedding, custom scripts/styles | `references/syntax-html-macro.md` |
 | Forge HTML macro runtime: loading data/config, `fetch` vs callback, iframe isolation, attachment scripts | `references/forge-html-macro-data-loading.md`, `references/forge-html-macro-runtime.md` |

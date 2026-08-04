@@ -463,6 +463,32 @@ def build_guide() -> dict[str, Any]:
                     "If multiple candidates are detected, pass --candidate with the 1-based index."
                 ),
             },
+            "macro.inspect": {
+                "group": "config",
+                "mutates": False,
+                "description": "Classify all macros on a known-good page without assuming an app vendor",
+                "flags": ["--from-page"],
+                "agent_hint": (
+                    "Use this for Marketplace or Forge macros whose exact key and storage shape vary by site. "
+                    "The result reports structured versus Forge storage, body type, parameters, and attachment linkage."
+                ),
+            },
+            "macro.learn": {
+                "group": "config",
+                "mutates": True,
+                "description": "Persist a site-scoped learned macro profile from a known-good page",
+                "flags": ["--from-page", "--alias", "--candidate", "--dry-run"],
+                "agent_hint": (
+                    "Use a stable alias such as mermaid. Profiles are scoped to the configured Confluence URL; "
+                    "invoke them as {macro:alias|source=<local-file>}."
+                ),
+            },
+            "macro.list": {
+                "group": "config",
+                "mutates": False,
+                "description": "List learned macro profiles for the configured Confluence site",
+                "flags": [],
+            },
             "skill.install": {
                 "group": "skill",
                 "mutates": True,
@@ -779,6 +805,11 @@ def build_guide() -> dict[str, Any]:
                 "recently_updated": "{recently-updated} → ac:structured-macro recently-updated",
                 "excerpt_include":  "{excerpt-include:Page Title} → ac:structured-macro excerpt-include",
                 "include_page":     "{include:Page Title} → ac:structured-macro include",
+                "learned_macro": (
+                    "{macro:alias|source=local-file} -> a site-scoped storage contract learned with "
+                    "confpub macro learn --from-page <WORKING_PAGE_ID> --alias <alias>. "
+                    "Supports classic body-less, attachment-backed, plain-text, rich-text, and Forge ADF body shapes."
+                ),
                 "html_macro": (
                     "::: html\\n<raw HTML>\\n::: -> ac:structured-macro html (DC) or html-macro (Cloud classic fallback). "
                     "Content is wrapped in CDATA and passed verbatim — Confluence does NOT strip "

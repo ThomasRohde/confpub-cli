@@ -257,6 +257,9 @@ def pull_pages(
     Returns a result dict suitable for the envelope.
     """
     client = build_client()
+    from confpub.config import load_config
+    from confpub.macro_profiles import load_macro_profiles
+    macro_profiles = load_macro_profiles(load_config().base_url)
 
     # Resolve target page
     if page_id:
@@ -295,6 +298,7 @@ def pull_pages(
     # Process each page
     files_result: list[dict[str, Any]] = []
     total_attachments = 0
+    total_macro_sources = 0
     pull_warnings: list[str] = []
     pulled_assets: dict[str, list[str]] = {}  # page_id -> list of relative asset paths
 
@@ -322,9 +326,25 @@ def pull_pages(
 
         # Convert storage format to markdown
         body_storage = page.get("body", {}).get("storage", {}).get("value", "")
-        conv_result = convert_storage_to_markdown(
-            body_storage, attachment_map=attachment_map,
+        macro_source_prefix = (
+            _posix_join("assets", "macro-sources")
+            if layout == "nested"
+            else _posix_join("assets", slug, "macro-sources")
         )
+        conv_result = convert_storage_to_markdown(
+            body_storage,
+            attachment_map=attachment_map,
+            macro_profiles=macro_profiles,
+            macro_source_prefix=macro_source_prefix,
+        )
+        generated_macro_sources = 0
+        for relative_path, content in conv_result.generated_files.items():
+            base_path = Path(out_path).parent if layout == "nested" else Path(output_dir)
+            target = base_path / Path(relative_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            generated_macro_sources += 1
+        total_macro_sources += generated_macro_sources
 
         # Fetch labels
         page_labels = [lbl["name"] for lbl in client.get_labels(pid)]
@@ -356,6 +376,7 @@ def pull_pages(
             "file": out_path,
             "version": version_num,
             "attachments_downloaded": attachments_downloaded,
+            "macro_sources_written": generated_macro_sources,
             "labels": page_labels,
         })
 
@@ -392,6 +413,7 @@ def pull_pages(
         "summary": {
             "pages_pulled": len(files_result),
             "attachments_downloaded": total_attachments,
+            "macro_sources_written": total_macro_sources,
             "manifest_generated": True,
         },
     }

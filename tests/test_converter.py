@@ -201,6 +201,17 @@ class TestFingerprint:
     def test_fingerprint_changes_with_content(self):
         assert fingerprint_content("<p>a</p>") != fingerprint_content("<p>b</p>")
 
+    def test_fingerprint_ignores_confluence_generated_macro_ids(self):
+        first = (
+            '<ac:structured-macro ac:name="diagram" ac:local-id="one" ac:macro-id="two">'
+            '</ac:structured-macro>'
+        )
+        second = (
+            '<ac:structured-macro ac:name="diagram" ac:local-id="three" ac:macro-id="four">'
+            '</ac:structured-macro>'
+        )
+        assert fingerprint_content(first) == fingerprint_content(second)
+
 
 class TestFullDocument:
     def test_mixed_document(self):

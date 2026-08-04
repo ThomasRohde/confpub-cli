@@ -396,6 +396,37 @@ class TestPublishLabels:
         mock_client.set_labels.assert_called_once_with("existing_456", ["tag1"])
         assert result["changes"][0]["labels_added"] == ["tag1"]
 
+    @patch("confpub.publish.load_config")
+    @patch("confpub.publish.ConfluenceClient")
+    def test_attachments_uploaded_on_noop(self, MockClient, mock_config, source_dir, mock_client):
+        """Attachment content can change even when the page storage fingerprint is unchanged."""
+        source = source_dir / "diagram-source"
+        source.write_text("flowchart LR\nA --> B\n", encoding="utf-8")
+        markdown_file = source_dir / "readme.md"
+        markdown_file.write_text("![source](diagram-source)", encoding="utf-8")
+        mock_client.get_page.return_value = {"id": "existing_456", "version": {"number": 1}}
+        mock_client.fingerprint_page.return_value = None
+        mock_client.upload_attachment.return_value = {"id": "att_1"}
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+
+        from confpub.converter import convert_markdown, fingerprint_content
+        from confpub.lockfile import Lockfile, LockPageEntry, save_lockfile
+        fingerprint = fingerprint_content(convert_markdown(markdown_file.read_text(encoding="utf-8")))
+        lockfile = Lockfile()
+        lockfile.pages["Readme"] = LockPageEntry(
+            page_id="existing_456",
+            version=1,
+            content_fingerprint=fingerprint,
+        )
+        save_lockfile(source_dir / "confpub.lock", lockfile)
+
+        result = publish_page(file=str(markdown_file), space="DEV", parent="Root")
+
+        assert result["changes"][0]["type"] == "page.noop"
+        assert result["summary"]["attachments_upload"] == 1
+        mock_client.upload_attachment.assert_called_once_with("existing_456", str(source.resolve()))
+
 
 class TestPublishErrors:
     def test_missing_file(self):

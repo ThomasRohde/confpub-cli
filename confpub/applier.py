@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from confpub.assets import AssetRef, discover_assets, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
+from confpub.assets import AssetRef, discover_assets, merge_assets, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
 from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, detect_unconverted_page_title_links, fingerprint_content
@@ -77,6 +77,8 @@ def apply_plan(
 
     config = load_config()
     client = ConfluenceClient(config)
+    from confpub.macro_profiles import load_macro_profiles
+    macro_profiles = load_macro_profiles(config.base_url)
 
     # Resolve HTML macro settings: explicit > config/env > platform default.
     html_macro_settings = resolve_html_macro_settings(
@@ -108,7 +110,7 @@ def apply_plan(
         parent_ids[plan.parent] = str(root_parent["id"])
 
     for page in plan.pages:
-        if page.operation == "noop":
+        if page.operation == "noop" and not page.attachments:
             continue
 
         source_path = plan_dir / page.source_file
@@ -140,6 +142,10 @@ def apply_plan(
 
         # Read and convert
         md_text = source_path.read_text(encoding="utf-8")
+        from confpub.macro_profiles import prepare_macros
+        prepared_macros = prepare_macros(md_text, source_path.parent, macro_profiles)
+        for warning in prepared_macros.warnings:
+            warnings.append(f"{page.source_file}: {warning}")
         for warning in detect_unconverted_page_title_links(md_text):
             warnings.append(f"{page.source_file}: {warning}")
         for warning in html_macro_fallback_warnings(
@@ -158,11 +164,16 @@ def apply_plan(
             html_macro_forge_cloud_id=html_macro_settings.forge_cloud_id,
             html_macro_forge_context_ids=html_macro_settings.forge_context_ids,
             html_macro_forge_account_id=html_macro_settings.forge_account_id,
+            macro_profiles=macro_profiles,
+            macro_sources=prepared_macros.sources,
         )
         local_fingerprint = fingerprint_content(storage)
 
         # Discover and process assets
-        assets = _planned_assets(page, source_path) if page.attachments else discover_assets(md_text, source_path.parent, None)
+        assets = merge_assets(
+            _planned_assets(page, source_path) if page.attachments else discover_assets(md_text, source_path.parent, None),
+            prepared_macros.assets,
+        )
 
         # Get parent ID
         parent_title = page.parent_title or plan.parent
@@ -185,11 +196,19 @@ def apply_plan(
                     effective_operation = "noop" if remote_fp == local_fingerprint else "update"
 
         if effective_operation == "noop":
-            changes.append({
+            noop_change: dict[str, Any] = {
                 "type": "page.noop",
                 "title": page.title,
                 "confluence_page_id": effective_page_id,
-            })
+            }
+            if assets:
+                if not dry_run and effective_page_id:
+                    upload_assets(client, effective_page_id, assets)
+                    noop_change["attachments_added"] = [asset.source_path for asset in assets]
+                    counts["attachments_upload"] += len(assets)
+                else:
+                    noop_change["attachments_to_upload"] = [asset.source_path for asset in assets]
+            changes.append(noop_change)
             continue
 
         if effective_operation == "create":

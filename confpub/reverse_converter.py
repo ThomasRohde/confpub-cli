@@ -31,13 +31,24 @@ class ConversionResult:
     markdown: str
     warnings: list[str] = field(default_factory=list)
     unknown_macros: list[str] = field(default_factory=list)
+    generated_files: dict[str, str] = field(default_factory=dict)
 
 
 class ConfluenceMarkdownConverter(MarkdownConverter):
     """Subclass of markdownify's MarkdownConverter with Confluence macro support."""
 
-    def __init__(self, attachment_map: dict[str, str] | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        attachment_map: dict[str, str] | None = None,
+        macro_profiles: dict[str, Any] | None = None,
+        macro_source_prefix: str = "macro-sources",
+        **kwargs: Any,
+    ) -> None:
         self._attachment_map = attachment_map or {}
+        self._macro_profiles = macro_profiles or {}
+        self._macro_source_prefix = macro_source_prefix.strip("/")
+        self._generated_files: dict[str, str] = {}
+        self._macro_source_counter = 0
         self._warnings: list[str] = []
         self._unknown_macros: list[str] = []
         kwargs.setdefault("heading_style", "ATX")
@@ -86,6 +97,12 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
         return text
 
     def _convert_macro(self, el: Tag, text: str, macro_name: str) -> str:
+        learned_alias = el.get("data-learned-alias")
+        if learned_alias and str(learned_alias) in self._macro_profiles:
+            return self._convert_learned_macro(
+                el,
+                self._macro_profiles[str(learned_alias)],
+            )
         if macro_name == "code":
             return self._convert_code_macro(el)
         if macro_name in REVERSE_ADMONITION_MAP:
@@ -112,6 +129,14 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
             return self._convert_excerpt_macro(el)
         if macro_name in ("html", "html-macro", "macro-html"):
             return self._convert_html_macro(el)
+        from confpub.macro_profiles import find_profile_for_macro
+        profile = find_profile_for_macro(
+            self._macro_profiles,
+            storage_format="structured-macro",
+            macro_name=macro_name,
+        )
+        if profile:
+            return self._convert_learned_macro(el, profile)
         # Unknown macro
         self._unknown_macros.append(macro_name)
         self._warnings.append(f"Unknown macro '{macro_name}' converted to HTML comment")
@@ -273,6 +298,41 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
         header = "excerpt hidden" if hidden else "excerpt"
         return f"\n\n::: {header}\n{body_text}\n:::\n\n"
 
+    def _convert_learned_macro(self, el: Tag, profile: Any) -> str:
+        params = self._extract_macro_params(el)
+        invocation: dict[str, str] = {}
+        for key, value in params.items():
+            if profile.default_parameters.get(key) != value:
+                invocation[key] = value
+        if profile.body_type == "attachment" and profile.attachment_parameter:
+            filename = params.get(profile.attachment_parameter, "")
+            source = self._attachment_map.get(filename)
+            if source:
+                invocation["source"] = source
+                invocation.pop(profile.attachment_parameter, None)
+            else:
+                invocation[profile.attachment_parameter] = filename
+                self._warnings.append(
+                    f"Learned macro '{profile.alias}' references attachment '{filename}' "
+                    "that was not downloaded"
+                )
+        elif profile.body_type in {"plain-text", "rich-text", "adf-body"}:
+            if profile.body_type in {"plain-text", "adf-body"}:
+                body_el = el.find("pre", class_="confluence-code-body")
+                body_content = body_el.get_text() if body_el else ""
+                extension = "txt"
+            else:
+                body_el = el.find("div", class_="confluence-rich-text-body")
+                body_content = self.convert(str(body_el)).strip() + "\n" if body_el else ""
+                extension = "md"
+            self._macro_source_counter += 1
+            source_path = (
+                f"{self._macro_source_prefix}/{profile.alias}-{self._macro_source_counter}.{extension}"
+            )
+            self._generated_files[source_path] = body_content
+            invocation["source"] = source_path
+        return self._build_macro_syntax("macro", profile.alias, invocation, True)
+
     def _convert_html_macro(self, el: Tag) -> str:
         code_el = el.find("pre", class_="confluence-code-body")
         content = code_el.get_text() if code_el else ""
@@ -313,7 +373,10 @@ class ConfluenceMarkdownConverter(MarkdownConverter):
 # ---------------------------------------------------------------------------
 
 
-def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
+def _preprocess_storage_format(
+    html: str,
+    macro_profiles: dict[str, Any] | None = None,
+) -> tuple[BeautifulSoup, list[str]]:
     """Parse and transform Confluence Storage Format into standard HTML.
 
     Returns the modified soup and a list of warnings.
@@ -325,9 +388,31 @@ def _preprocess_storage_format(html: str) -> tuple[BeautifulSoup, list[str]]:
     # surrounding whitespace when markdownify processes them.
     _INLINE_MACROS = {"mathinline", "status", "anchor", "jira"}
 
-    # 1. Transform Forge ADF HTML macro extension → div[data-confluence-macro]
+    profiles = macro_profiles or {}
+
+    # 1. Transform Forge ADF extensions, preferring learned site profiles.
     for adf in soup.find_all("ac:adf-extension"):
         body_param = adf.find("ac:adf-parameter", attrs={"key": "__body-content"})
+        extension_key_tag = adf.find("ac:adf-attribute", attrs={"key": "extension-key"})
+        extension_key = extension_key_tag.get_text().strip() if extension_key_tag else ""
+        inferred_name = extension_key.rstrip("/").split("/")[-1] if extension_key else None
+        from confpub.macro_profiles import find_profile_for_macro
+        learned = find_profile_for_macro(
+            profiles,
+            storage_format="forge-adf-extension",
+            macro_name=inferred_name,
+        )
+        if learned:
+            div = soup.new_tag("div")
+            div["data-confluence-macro"] = inferred_name or learned.alias
+            div["data-learned-alias"] = learned.alias
+            if body_param is not None:
+                pre = soup.new_tag("pre")
+                pre["class"] = "confluence-code-body"
+                pre.string = body_param.get_text()
+                div.append(pre)
+            adf.replace_with(div)
+            continue
         if not body_param:
             continue
 
@@ -535,6 +620,8 @@ def convert_storage_to_markdown(
     storage_format: str,
     *,
     attachment_map: dict[str, str] | None = None,
+    macro_profiles: dict[str, Any] | None = None,
+    macro_source_prefix: str = "macro-sources",
 ) -> ConversionResult:
     """Convert Confluence Storage Format HTML to Markdown.
 
@@ -548,9 +635,16 @@ def convert_storage_to_markdown(
     if not storage_format or not storage_format.strip():
         return ConversionResult(markdown="")
 
-    soup, preprocess_warnings = _preprocess_storage_format(storage_format)
+    soup, preprocess_warnings = _preprocess_storage_format(
+        storage_format,
+        macro_profiles=macro_profiles,
+    )
 
-    converter = ConfluenceMarkdownConverter(attachment_map=attachment_map)
+    converter = ConfluenceMarkdownConverter(
+        attachment_map=attachment_map,
+        macro_profiles=macro_profiles,
+        macro_source_prefix=macro_source_prefix,
+    )
     markdown = converter.convert(str(soup))
 
     # Clean up excessive blank lines
@@ -563,4 +657,5 @@ def convert_storage_to_markdown(
         markdown=markdown,
         warnings=warnings,
         unknown_macros=unknown_macros,
+        generated_files=converter._generated_files,
     )

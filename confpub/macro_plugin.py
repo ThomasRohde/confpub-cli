@@ -37,6 +37,7 @@ KNOWN_MACROS: frozenset[str] = frozenset(
         "recently-updated",
         "excerpt-include",
         "include",
+        "macro",
     ]
 )
 

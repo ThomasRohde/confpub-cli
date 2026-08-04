@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from confpub.assets import discover_assets, discover_html_macro_warnings, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
+from confpub.assets import discover_assets, discover_html_macro_warnings, merge_assets, rewrite_html_macro_urls, rewrite_image_urls, upload_assets
 from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient, build_page_url
 from confpub.converter import convert_markdown, detect_unconverted_page_title_links, fingerprint_content
@@ -102,6 +102,9 @@ def publish_page(
         forge_context_ids_override=html_macro_forge_context_ids,
         forge_account_id_override=html_macro_forge_account_id,
     )
+    from confpub.macro_profiles import load_macro_profiles, prepare_macros
+    macro_profiles = load_macro_profiles(config.base_url)
+    prepared_macros = prepare_macros(md_text, source_path.parent, macro_profiles)
     storage = convert_markdown(
         md_text,
         html_macro_name=html_macro_settings.name,
@@ -112,6 +115,8 @@ def publish_page(
         html_macro_forge_cloud_id=html_macro_settings.forge_cloud_id,
         html_macro_forge_context_ids=html_macro_settings.forge_context_ids,
         html_macro_forge_account_id=html_macro_settings.forge_account_id,
+        macro_profiles=macro_profiles,
+        macro_sources=prepared_macros.sources,
     )
     local_fingerprint = fingerprint_content(storage)
     client = ConfluenceClient(config)
@@ -152,10 +157,14 @@ def publish_page(
             current_version = version.get("number") if isinstance(version, dict) else version
 
     # Discover assets (including script/link refs in ::: html blocks)
-    assets = discover_assets(md_text, source_path.parent)
+    assets = merge_assets(
+        discover_assets(md_text, source_path.parent),
+        prepared_macros.assets,
+    )
     html_macro_warnings = discover_html_macro_warnings(md_text, source_path.parent)
     warnings = (
         html_macro_warnings
+        + prepared_macros.warnings
         + detect_unconverted_page_title_links(md_text)
         + html_macro_fallback_warnings(
             md_text,
@@ -218,10 +227,18 @@ def publish_page(
         if labels and existing_page_id:
             client.set_labels(existing_page_id, labels)
             noop_change["labels_added"] = labels
+        uploaded_attachments: list[str] = []
+        if assets and existing_page_id:
+            upload_assets(client, existing_page_id, assets)
+            uploaded_attachments = [asset.source_path for asset in assets]
+            noop_change["attachments_added"] = uploaded_attachments
         return {
             "dry_run": False,
             "changes": [noop_change],
-            "summary": {"noop": 1},
+            "summary": {
+                "noop": 1,
+                "attachments_upload": len(uploaded_attachments),
+            },
         }
 
     backup_file_path: str | None = None

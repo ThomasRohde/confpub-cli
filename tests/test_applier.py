@@ -331,6 +331,44 @@ class TestApplyAssets:
         assert asset.filename == "dashboard-data.js"
 
 
+class TestNoopAttachments:
+    @patch("confpub.applier.upload_assets")
+    @patch("confpub.applier.load_config")
+    @patch("confpub.applier.ConfluenceClient")
+    def test_noop_page_still_uploads_planned_attachments(
+        self, MockClient, mock_config, mock_upload_assets, tmp_path, mock_client,
+    ):
+        (tmp_path / "page.md").write_text("# Page", encoding="utf-8")
+        (tmp_path / "diagram-source").write_text("flowchart LR", encoding="utf-8")
+        plan_data = {
+            "schema_version": "1.0",
+            "created_at": "2026-08-04T00:00:00Z",
+            "space": "DEV",
+            "parent": "Root",
+            "pages": [{
+                "id": "plan_1",
+                "title": "Page",
+                "source_file": "page.md",
+                "confluence_page_id": "123",
+                "current_fingerprint": "same",
+                "operation": "noop",
+                "attachments": [{"file": "diagram-source", "operation": "upload"}],
+            }],
+            "summary": {"noop": 1, "attachments_to_upload": 1},
+        }
+        (tmp_path / "plan.json").write_text(json.dumps(plan_data), encoding="utf-8")
+        mock_client.fingerprint_page.return_value = "same"
+        MockClient.return_value = mock_client
+        mock_config.return_value = MagicMock()
+        mock_upload_assets.return_value = []
+
+        result = apply_plan(str(tmp_path / "plan.json"), dry_run=False)
+
+        assert result["summary"]["attachments_upload"] == 1
+        mock_upload_assets.assert_called_once()
+        assert result["changes"][0]["attachments_added"] == ["diagram-source"]
+
+
 class TestFingerprintCheck:
     @patch("confpub.applier.load_config")
     @patch("confpub.applier.ConfluenceClient")

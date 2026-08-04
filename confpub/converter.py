@@ -111,6 +111,8 @@ class ConfluenceRenderer:
         html_macro_forge_cloud_id: str | None = None,
         html_macro_forge_context_ids: str | None = None,
         html_macro_forge_account_id: str | None = None,
+        macro_profiles: dict[str, Any] | None = None,
+        macro_sources: dict[str, str] | None = None,
     ) -> None:
         self._output: list[str] = []
         self._list_stack: list[str] = []  # track nested ol/ul ("ol", "ul", "task-list")
@@ -124,6 +126,8 @@ class ConfluenceRenderer:
         self._html_macro_forge_cloud_id = html_macro_forge_cloud_id
         self._html_macro_forge_context_ids = html_macro_forge_context_ids
         self._html_macro_forge_account_id = html_macro_forge_account_id
+        self._macro_profiles = macro_profiles or {}
+        self._macro_sources = macro_sources or {}
         self._link_stack: list[bool] = []
 
     def render(self, tokens: list[Token], options: dict[str, Any], env: dict[str, Any]) -> str:
@@ -859,6 +863,101 @@ class ConfluenceRenderer:
         parts.append("</ac:structured-macro>")
         return "".join(parts)
 
+    def _macro_macro(self, positional: str, params: dict[str, str]) -> str:
+        """Render a site-scoped learned macro profile invoked as ``{macro:alias|...}``."""
+        alias = positional
+        profile = self._macro_profiles.get(alias)
+        if not profile:
+            raise ValueError(
+                f"Learned macro alias '{alias}' is not configured for this Confluence site"
+            )
+
+        invocation = dict(params)
+        source = invocation.pop("source", "")
+        body_type = profile.body_type
+        source_content = self._macro_sources.get(source) if source else None
+        if body_type != "none" and source_content is None:
+            raise ValueError(f"Learned macro '{alias}' requires source=<local-file>")
+
+        if profile.storage_format == "forge-adf-extension":
+            return self._render_learned_adf_macro(profile, invocation, source_content or "")
+
+        macro_params = dict(profile.default_parameters)
+        macro_params.update(invocation)
+        if body_type == "attachment":
+            attachment_parameter = profile.attachment_parameter
+            if not attachment_parameter:
+                raise ValueError(
+                    f"Learned attachment macro '{alias}' has no attachment parameter"
+                )
+            macro_params[attachment_parameter] = re.split(r"[\\/]", source)[-1]
+
+        identity = f"{alias}|" + "|".join(
+            f"{key}={value}" for key, value in sorted(macro_params.items())
+        )
+        local_id = uuid.uuid5(uuid.NAMESPACE_URL, f"confpub-learned-macro:local:{identity}")
+        macro_id = uuid.uuid5(uuid.NAMESPACE_URL, f"confpub-learned-macro:macro:{identity}")
+        attrs = dict(profile.attributes)
+        attrs["ac:local-id"] = str(local_id)
+        attrs["ac:macro-id"] = str(macro_id)
+        attr_text = "".join(
+            f' {escape(key)}="{escape(str(value))}"' for key, value in attrs.items()
+        )
+        parts = [
+            f'<ac:structured-macro ac:name="{escape(profile.macro_name or alias)}"{attr_text}>'
+        ]
+        for key, value in macro_params.items():
+            parts.append(
+                f'<ac:parameter ac:name="{escape(key)}">{escape(value)}</ac:parameter>'
+            )
+        if body_type == "plain-text":
+            safe_body = (source_content or "").replace("]]>", "]]]]><![CDATA[>")
+            parts.append(f"<ac:plain-text-body><![CDATA[{safe_body}]]></ac:plain-text-body>")
+        elif body_type == "rich-text":
+            rich_storage = convert_markdown(
+                source_content or "",
+                macro_profiles=self._macro_profiles,
+                macro_sources=self._macro_sources,
+            )
+            parts.append(f"<ac:rich-text-body>{rich_storage}</ac:rich-text-body>")
+        parts.append("</ac:structured-macro>")
+        return "".join(parts)
+
+    def _render_learned_adf_macro(
+        self,
+        profile: Any,
+        invocation: dict[str, str],
+        source_content: str,
+    ) -> str:
+        """Rehydrate a learned Forge ADF template with deterministic identity and body."""
+        from bs4 import BeautifulSoup
+
+        if not profile.storage_template:
+            raise ValueError(f"Learned Forge macro '{profile.alias}' has no storage template")
+        soup = BeautifulSoup(profile.storage_template, "html.parser")
+        root = soup.find("ac:adf-extension")
+        if root is None:
+            raise ValueError(f"Learned Forge macro '{profile.alias}' has an invalid template")
+        if profile.body_type == "adf-body":
+            body = root.find("ac:adf-parameter", attrs={"key": "__body-content"})
+            if body is None:
+                raise ValueError(f"Learned Forge macro '{profile.alias}' has no body parameter")
+            body.clear()
+            body.append(source_content)
+        for key, value in invocation.items():
+            parameter = root.find("ac:adf-parameter", attrs={"key": key})
+            if parameter is not None:
+                parameter.clear()
+                parameter.append(value)
+        local_id = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"confpub-learned-adf:{profile.alias}:{source_content}:{sorted(invocation.items())}",
+        )
+        local_id_tag = root.find("ac:adf-attribute", attrs={"key": "local-id"})
+        if local_id_tag is not None:
+            local_id_tag.clear()
+            local_id_tag.append(str(local_id))
+        return str(root)
 
 def _create_parser() -> MarkdownIt:
     """Create a configured markdown-it-py parser."""
@@ -929,6 +1028,8 @@ def convert_markdown(
     html_macro_forge_cloud_id: str | None = None,
     html_macro_forge_context_ids: str | None = None,
     html_macro_forge_account_id: str | None = None,
+    macro_profiles: dict[str, Any] | None = None,
+    macro_sources: dict[str, str] | None = None,
 ) -> str:
     """Convert Markdown text to Confluence Storage Format.
 
@@ -954,6 +1055,8 @@ def convert_markdown(
         html_macro_forge_cloud_id=html_macro_forge_cloud_id,
         html_macro_forge_context_ids=html_macro_forge_context_ids,
         html_macro_forge_account_id=html_macro_forge_account_id,
+        macro_profiles=macro_profiles,
+        macro_sources=macro_sources,
     )
     html = renderer.render(tokens, {}, {})
     return _wrap_non_layout_content(html)
@@ -1002,5 +1105,10 @@ def extract_front_matter(md_text: str) -> dict[str, Any] | None:
 
 
 def fingerprint_content(content: str) -> str:
-    """Return SHA-256 hex digest of content."""
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    """Return a semantic SHA-256 digest, ignoring Confluence-generated macro IDs."""
+    normalized = re.sub(
+        r'\s+(?:ac:local-id|ac:macro-id)="[^"]*"',
+        "",
+        content,
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from confpub.assets import discover_assets
+from confpub.assets import discover_assets, merge_assets
 from confpub.config import load_config, resolve_html_macro_settings
 from confpub.confluence import ConfluenceClient
 from confpub.converter import convert_markdown, detect_unconverted_page_title_links, fingerprint_content
@@ -61,6 +61,8 @@ def create_plan(
     # Build Confluence client
     config = load_config()
     client = ConfluenceClient(config)
+    from confpub.macro_profiles import load_macro_profiles
+    macro_profiles = load_macro_profiles(config.base_url)
 
     # Resolve HTML macro settings: explicit > config/env > platform default.
     html_macro_settings = resolve_html_macro_settings(
@@ -99,6 +101,10 @@ def create_plan(
 
         # Read and convert markdown
         md_text = source_path.read_text(encoding="utf-8")
+        from confpub.macro_profiles import prepare_macros
+        prepared_macros = prepare_macros(md_text, source_path.parent, macro_profiles)
+        for warning in prepared_macros.warnings:
+            warnings.append(f"{fp.file}: {warning}")
         for warning in detect_unconverted_page_title_links(md_text):
             warnings.append(f"{fp.file}: {warning}")
         for warning in html_macro_fallback_warnings(
@@ -117,6 +123,8 @@ def create_plan(
             html_macro_forge_cloud_id=html_macro_settings.forge_cloud_id,
             html_macro_forge_context_ids=html_macro_settings.forge_context_ids,
             html_macro_forge_account_id=html_macro_settings.forge_account_id,
+            macro_profiles=macro_profiles,
+            macro_sources=prepared_macros.sources,
         )
         local_fingerprint = fingerprint_content(storage)
 
@@ -157,7 +165,10 @@ def create_plan(
                     operation = "update"
 
         # Discover attachments
-        assets = discover_assets(md_text, source_path.parent, fp.assets or None)
+        assets = merge_assets(
+            discover_assets(md_text, source_path.parent, fp.assets or None),
+            prepared_macros.assets,
+        )
         plan_attachments = [
             PlanAttachment(file=a.source_path, operation="upload")
             for a in assets
